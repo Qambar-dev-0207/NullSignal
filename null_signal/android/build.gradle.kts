@@ -1,0 +1,67 @@
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+val newBuildDir: Directory = rootProject.layout.buildDirectory.dir("../../build").get()
+rootProject.layout.buildDirectory.value(newBuildDir)
+
+subprojects {
+    val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
+    project.layout.buildDirectory.value(newSubprojectBuildDir)
+}
+
+subprojects {
+    afterEvaluate {
+        if (project.hasProperty("android")) {
+            configure<com.android.build.gradle.BaseExtension> {
+                if (namespace == null) {
+                    namespace = "com.nullsignal.${project.name.replace(":", ".").replace("-", ".")}"
+                }
+                
+                compileOptions {
+                    sourceCompatibility = JavaVersion.VERSION_17
+                    targetCompatibility = JavaVersion.VERSION_17
+                }
+            }
+            
+            // Fix for AGP 8.0+ where 'package' attribute in AndroidManifest.xml is forbidden
+            val android = project.extensions.getByName("android") as com.android.build.gradle.BaseExtension
+            android.sourceSets.getByName("main").manifest.srcFile("src/main/AndroidManifest.xml")
+            
+            project.tasks.withType<com.android.build.gradle.tasks.ProcessLibraryManifest>().configureEach {
+                doFirst {
+                    val manifestFile = mainManifest.get().asFile
+                    if (manifestFile.exists()) {
+                        val content = manifestFile.readText()
+                        if (content.contains("package=")) {
+                            val newContent = content.replace(Regex("package=\"[^\"]*\""), "")
+                            manifestFile.writeText(newContent)
+                        }
+                    }
+                }
+            }
+        }
+        
+        project.tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+            kotlinOptions {
+                jvmTarget = "17"
+            }
+        }
+        
+        project.tasks.withType<JavaCompile>().configureEach {
+            sourceCompatibility = "17"
+            targetCompatibility = "17"
+        }
+    }
+}
+
+subprojects {
+    project.evaluationDependsOn(":app")
+}
+
+tasks.register<Delete>("clean") {
+    delete(rootProject.layout.buildDirectory)
+}
