@@ -12,6 +12,7 @@ class MeshDevice {
   final double? batteryLevel;
   final int? rssi; // Signal Strength
   final bool isGateway;
+  final String? publicKey; // Base64 encoded public key
 
   MeshDevice({
     required this.deviceId,
@@ -20,6 +21,7 @@ class MeshDevice {
     this.batteryLevel,
     this.rssi,
     this.isGateway = false,
+    this.publicKey,
   });
 
   bool get isConnected => status == MeshDeviceStatus.connected;
@@ -31,6 +33,7 @@ class MeshDevice {
     double? batteryLevel,
     int? rssi,
     bool? isGateway,
+    String? publicKey,
   }) {
     return MeshDevice(
       deviceId: deviceId ?? this.deviceId,
@@ -39,6 +42,7 @@ class MeshDevice {
       batteryLevel: batteryLevel ?? this.batteryLevel,
       rssi: rssi ?? this.rssi,
       isGateway: isGateway ?? this.isGateway,
+      publicKey: publicKey ?? this.publicKey,
     );
   }
 }

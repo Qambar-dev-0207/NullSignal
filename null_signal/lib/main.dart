@@ -1,89 +1,121 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:isar/isar.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:null_signal/core/models/mesh_packet.dart';
+import 'package:null_signal/features/ai/data/models/chat_message.dart';
 import 'package:null_signal/core/services/mesh_service.dart';
-import 'package:null_signal/core/services/security_service.dart';
+import 'package:null_signal/core/services/gateway_monitor.dart';
 import 'package:null_signal/core/theme/app_theme.dart';
-import 'package:null_signal/features/ai/data/repositories/android_ai_service.dart';
-import 'package:null_signal/features/ai/data/repositories/ios_ai_service.dart';
+import 'package:null_signal/core/services/security_service.dart';
+import 'package:null_signal/features/ai/data/repositories/gemini_ai_service.dart';
 import 'package:null_signal/features/ai/domain/repositories/ai_service.dart';
+import 'package:null_signal/features/ai/presentation/bloc/ai_cubit.dart';
 import 'package:null_signal/features/mesh/data/repositories/nearby_mesh_service_impl.dart';
+import 'package:null_signal/features/mesh/data/repositories/simulated_mesh_service.dart';
+import 'package:null_signal/features/mesh/presentation/bloc/mesh_cubit.dart';
+import 'package:null_signal/features/sos/presentation/bloc/sos_cubit.dart';
+import 'package:null_signal/features/sos/presentation/pages/panic_navigation_wrapper.dart';
 import 'package:null_signal/features/sos/domain/repositories/safety_monitor.dart';
-import 'package:null_signal/features/sos/presentation/bloc/ui_orchestrator_cubit.dart';
-import 'package:null_signal/features/sos/presentation/pages/panic_home_page.dart';
+import 'package:device_info_plus/device_info_plus.dart';
+import 'dart:io';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  runApp(const NullSignalApp());
+  
+  // Initialize Isar
+  final dir = await getApplicationDocumentsDirectory();
+  final isar = await Isar.open(
+    [MeshPacketSchema, ChatMessageSchema],
+    directory: dir.path,
+  );
+
+  final deviceInfo = DeviceInfoPlugin();
+  bool isPhysicalDevice = true;
+  
+  try {
+    if (Platform.isAndroid) {
+      final androidInfo = await deviceInfo.androidInfo;
+      isPhysicalDevice = androidInfo.isPhysicalDevice;
+    } else if (Platform.isIOS) {
+      final iosInfo = await deviceInfo.iosInfo;
+      isPhysicalDevice = iosInfo.isPhysicalDevice;
+    }
+  } catch (e) {
+    isPhysicalDevice = false;
+  }
+
+  final gatewayMonitor = GatewayMonitor();
+  final securityService = SecurityService();
+  final safetyMonitor = SafetyMonitor()..start();
+
+  // Use NearbyMeshServiceImpl for real devices, Simulated for emulators
+  final MeshService meshService = isPhysicalDevice 
+      ? NearbyMeshServiceImpl(gatewayMonitor, securityService) 
+      : SimulatedMeshService(gatewayMonitor, securityService);
+      
+  // Initialize AI Service with a placeholder or environment variable API key
+  // Replace 'YOUR_GEMINI_API_KEY' with a real key if needed.
+  final aiService = GeminiAIService(apiKey: 'YOUR_GEMINI_API_KEY');
+  
+  runApp(NullSignalApp(
+    meshService: meshService, 
+    aiService: aiService,
+    securityService: securityService,
+    safetyMonitor: safetyMonitor,
+    isar: isar,
+  ));
 }
 
 class NullSignalApp extends StatelessWidget {
-  const NullSignalApp({super.key});
+  final MeshService meshService;
+  final AIService aiService;
+  final SecurityService securityService;
+  final SafetyMonitor safetyMonitor;
+  final Isar isar;
+
+  const NullSignalApp({
+    super.key, 
+    required this.meshService,
+    required this.aiService,
+    required this.securityService,
+    required this.safetyMonitor,
+    required this.isar,
+  });
 
   @override
   Widget build(BuildContext context) {
     return MultiRepositoryProvider(
       providers: [
-        RepositoryProvider<MeshService>(create: (_) => NearbyMeshServiceImpl()),
-        RepositoryProvider<SecurityService>(create: (_) => SecurityService()),
-        RepositoryProvider<AIService>(create: (_) {
-          if (Platform.isAndroid) return AndroidAIService();
-          return IosAIService();
-        }),
-        RepositoryProvider<SafetyMonitor>(create: (_) => SafetyMonitor()),
+        RepositoryProvider<MeshService>.value(value: meshService),
+        RepositoryProvider<AIService>.value(value: aiService),
+        RepositoryProvider<SecurityService>.value(value: securityService),
+        RepositoryProvider<SafetyMonitor>.value(value: safetyMonitor),
+        RepositoryProvider<Isar>.value(value: isar),
       ],
-      child: BlocProvider(
-        create: (_) => UIOrchestratorCubit(),
-        child: BlocBuilder<UIOrchestratorCubit, AppUIState>(
-          builder: (context, state) {
-            final isPanic = state == AppUIState.panic;
-            
-            return MaterialApp(
-              title: 'NullSignal',
-              debugShowCheckedModeBanner: false,
-              theme: AppTheme.normalTheme,
-              darkTheme: AppTheme.normalTheme,
-              themeMode: isPanic ? ThemeMode.dark : ThemeMode.system,
-              builder: (context, child) {
-                return Theme(
-                  data: isPanic ? AppTheme.panicTheme : AppTheme.normalTheme,
-                  child: child!,
-                );
-              },
-              home: isPanic ? const PanicHomePage() : const NormalHomePage(),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
+      child: MultiBlocProvider(
+        providers: [
+          BlocProvider<MeshCubit>(
+            create: (context) => MeshCubit(meshService, securityService, meshService.deviceId)..startScanning(),
+          ),
+          BlocProvider<AiCubit>(
+            create: (context) => AiCubit(aiService, isar)..initialize(),
+          ),
+          BlocProvider<SosCubit>(
+            create: (context) => SosCubit(meshService, securityService, meshService.deviceId),
+          ),
+        ],
+        child: MaterialApp(
+          title: 'NullSignal',
+          debugShowCheckedModeBanner: false,
+          
+          // Applying the high-precision "NullSignal Core" design system
+          theme: AppTheme.normalTheme,
+          darkTheme: AppTheme.normalTheme, // Default to Dark
+          themeMode: ThemeMode.dark,
 
-class NormalHomePage extends StatelessWidget {
-  const NormalHomePage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('NullSignal')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.signal_cellular_off, size: 80, color: Colors.blueGrey),
-            const SizedBox(height: 24),
-            const Text('System Status: Ready', style: TextStyle(fontSize: 24)),
-            const SizedBox(height: 48),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
-              ),
-              onPressed: () => context.read<UIOrchestratorCubit>().switchToPanic(),
-              child: const Text('ACTIVATE PANIC MODE', style: TextStyle(fontSize: 20)),
-            ),
-          ],
+          // Starting with the Panic Mode orchestration wrapper
+          home: const PanicNavigationWrapper(),
         ),
       ),
     );

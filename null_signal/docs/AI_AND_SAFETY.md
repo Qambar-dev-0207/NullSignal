@@ -12,23 +12,22 @@ NullSignal provides offline AI assistance across both major mobile platforms thr
 ### Capabilities
 - **Emergency Triage:** Automated START triage scoring (Green/Yellow/Red) based on symptoms.
 - **First-Aid Guidance:** Step-by-step instructions for CPR, bleeding control, and other critical interventions.
-- **Multilingual Survival Tips:** Cross-language support for diverse disaster environments.
+- **Persistent Memory:** Conversational history is stored locally via **Isar DB**, allowing users to refer back to prior AI guidance even after app restarts.
 
 ## 2. Security Layer (`SecurityService`)
-NullSignal implements end-to-end encryption for all mesh traffic to protect survivor privacy and prevent malicious tampering.
+NullSignal implements industrial-grade cryptography to protect survivor privacy and prevent malicious tampering in decentralized environments.
 
 ### Cryptographic Standards
-- **Encryption:** **AES-256-GCM** is used to encrypt message payloads.
-- **Integrity:** **ECDSA (P-256)** is used to sign every packet.
-- **Decentralized Identity:** Each device generates its own keypair on first launch. The public key serves as the `senderId`.
-
-### Zero-Knowledge Relays
-Relay nodes only process the routing metadata (`packetId`, `ttl`, `receiverId`). The message content remains encrypted and unreadable to any device other than the intended recipient or a trusted gateway.
+- **Identity & Signatures:** Uses **Ed25519** for high-speed, secure device identity and packet-level integrity. Every mesh packet is verified at every hop.
+- **Key Exchange:** Implements **X25519 (Diffie-Hellman)** for secure peer-to-peer shared secret derivation.
+- **Encryption:** **AES-256-GCM** provides authenticated end-to-end encryption (E2EE) for direct messages.
+- **Zero-Knowledge Relays:** Intermediate nodes only process routing metadata. Message payloads remain unreadable to everyone except the intended recipient.
 
 ## 3. Safety Layer (`SafetyMonitor`)
-The "Dead Man's Switch" is a critical safety feature for incapacitated users.
+The "Dead Man's Switch" provides automated protection for incapacitated users.
 
 ### Monitoring Logic
-1. **Motion Detection:** The app monitors the accelerometer via `sensors_plus`.
-2. **Inactivity Timeout:** If no significant movement is detected for 8 minutes, the app triggers a high-priority local check-in prompt.
-3. **Auto-SOS:** If the user does not dismiss the prompt within 30 seconds, NullSignal automatically broadcasts an SOS packet to the mesh containing the last known coordinates.
+1. **Motion Detection:** Monitors device accelerometer via `sensors_plus`.
+2. **Inactivity Timeout:** Triggers after 8 minutes of zero significant motion.
+3. **Local Check-in:** Displays a high-priority "SAFETY CHECK-IN" overlay with haptic feedback.
+4. **Auto-SOS:** If the user fails to confirm safety within 30 seconds, the system automatically broadcasts an SOS packet to the entire mesh network.

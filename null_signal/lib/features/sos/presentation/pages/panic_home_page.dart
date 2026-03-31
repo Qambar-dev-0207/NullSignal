@@ -56,7 +56,7 @@ class _PanicHomeViewState extends State<PanicHomeView> {
   StreamSubscription<MeshPacket>? _incomingPacketSubscription;
 
   final List<Widget> _screens = [
-    const PanicAiHelpScreen(),
+    const PanicAIHelpScreen(),
     const SosScreen(),
     const PanicNearbyScreen(),
   ];

@@ -56,6 +56,7 @@ class RoutingEngine {
     return MeshPacket(
       packetId: packet.packetId,
       senderId: packet.senderId,
+      senderPublicKey: packet.senderPublicKey,
       receiverId: packet.receiverId,
       payload: packet.payload,
       signature: packet.signature,

@@ -37,6 +37,7 @@ class SosCubit extends Cubit<SosState> {
       final packet = MeshPacket(
         packetId: packetId,
         senderId: _currentDeviceId,
+        senderPublicKey: 'mock_key',
         payload: payload,
         signature: signature.toString(),
         timestamp: timestamp,

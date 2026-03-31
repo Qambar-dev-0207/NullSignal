@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:null_signal/core/services/mesh_service.dart';
 import 'package:null_signal/core/services/security_service.dart';
+import 'package:null_signal/core/services/gateway_monitor.dart';
 import 'package:null_signal/core/theme/app_theme.dart';
 import 'package:null_signal/features/mesh/data/repositories/nearby_mesh_service_impl.dart';
 import 'package:null_signal/features/sos/presentation/bloc/sos_cubit.dart';
@@ -47,7 +48,7 @@ void main() {
       await tester.pumpWidget(
         MultiRepositoryProvider(
           providers: [
-            RepositoryProvider<MeshService>.value(value: NearbyMeshServiceImpl()),
+            RepositoryProvider<MeshService>.value(value: NearbyMeshServiceImpl(GatewayMonitor(), SecurityService())),
             RepositoryProvider<SecurityService>.value(value: SecurityService()),
           ],
           child: MultiBlocProvider(

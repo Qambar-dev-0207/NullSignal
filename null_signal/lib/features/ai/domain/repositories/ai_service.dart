@@ -8,6 +8,9 @@ abstract class AIService {
   /// Gets offline first-aid guidance for a specific injury/condition
   Future<String> getFirstAidGuidance(String condition);
 
+  /// Chat with the AI for general queries
+  Future<String> chat(String message);
+
   /// Closes the AI engine to free up resources
   Future<void> dispose();
 }

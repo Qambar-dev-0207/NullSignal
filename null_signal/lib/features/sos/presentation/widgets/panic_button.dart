@@ -27,6 +27,7 @@ class PanicButton extends StatelessWidget {
         style: ElevatedButton.styleFrom(
           backgroundColor: color ?? Theme.of(context).colorScheme.primary,
           foregroundColor: textColor ?? Theme.of(context).colorScheme.onPrimary,
+          minimumSize: const Size(double.infinity, 96),
         ),
         onPressed: () {
           FeedbackService.triggerConfirmation();

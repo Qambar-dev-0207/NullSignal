@@ -14,6 +14,7 @@ void main() {
     final testPacket = MeshPacket(
       packetId: 'p1',
       senderId: 's1',
+      senderPublicKey: 'mock_key',
       payload: 'hello',
       signature: 'sig',
       timestamp: DateTime.now().millisecondsSinceEpoch,
@@ -36,6 +37,7 @@ void main() {
       final expiredPacket = MeshPacket(
         packetId: 'p2',
         senderId: 's1',
+        senderPublicKey: 'mock_key',
         payload: 'hello',
         signature: 'sig',
         timestamp: DateTime.now().millisecondsSinceEpoch,
@@ -84,6 +86,7 @@ void main() {
       final gatewayPacket = MeshPacket(
         packetId: 'p3',
         senderId: 's1',
+        senderPublicKey: 'mock_key',
         payload: 'hello',
         signature: 'sig',
         timestamp: DateTime.now().millisecondsSinceEpoch,

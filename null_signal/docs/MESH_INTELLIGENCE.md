@@ -7,30 +7,38 @@ The Mesh Intelligence layer in NullSignal provides a decentralized, multi-hop co
 
 #### 1. MeshService (`lib/core/services/mesh_service.dart`)
 An abstract interface defining the contract for peer-to-peer discovery and communication.
-- **`NearbyMeshService`**: The concrete implementation using Google's Nearby Connections API (BLE & WiFi Direct).
+- **`NearbyMeshServiceImpl`**: Concrete implementation using Google's Nearby Connections (BLE & WiFi Direct).
+- **`SimulatedMeshService`**: Development mock for testing UI/UX in emulators.
 
 #### 2. RoutingEngine (`lib/features/mesh/domain/repositories/routing_engine.dart`)
-A pure logic component responsible for determining the best path for data packets.
-- **Loop Prevention:** Uses an LRU cache of `seenPacketIds` (size: 1000) to ensure packets aren't forwarded repeatedly.
-- **TTL (Time To Live):** Each hop decrements the TTL; packets with TTL=0 are discarded.
-- **Priority-Weighted Routing:**
-  - **Battery-Aware:** Prioritizes relaying through devices with higher battery levels.
-  - **Gateway-Aware:** Automatically routes packets toward known Gateway Nodes if internet escalation is required (`isGatewayRelay: true`).
+Pure logic component for pathfinding and multi-hop forwarding.
+- **Loop Prevention:** Uses an LRU cache of `seenPacketIds` to block duplicate packet processing.
+- **TTL (Time To Live):** Decremented per hop; zero-TTL packets are dropped.
+- **Signature Enforcement:** Every incoming packet is verified using the sender's public key. Invalid packets are discarded immediately.
+- **Gateway Prioritization:** Specifically routes `isGatewayRelay` packets toward nodes with active internet status.
 
 #### 3. GatewayMonitor (`lib/core/services/gateway_monitor.dart`)
-Passively monitors device connectivity. If the device gains internet access (WiFi/Cell/Ethernet), it informs the mesh that it can now act as an internet gateway for others.
+Monitors system-level connectivity (WiFi/Cell). Nodes with internet access advertise themselves with a `|G` suffix, allowing the mesh to automatically discover and use them as bridges to the cloud.
+
+#### 4. SecurityService (`lib/core/services/security_service.dart`)
+- **Identity:** Uses **Ed25519** for cryptographic device identity and packet signatures.
+- **E2EE:** Implements **X25519** Diffie-Hellman key exchange to derive 256-bit shared secrets for direct peer-to-peer messaging.
+- **Payload Protection:** All direct messages are encrypted via **AES-256-GCM** before mesh transmission.
 
 ### Data Model: MeshPacket
-The fundamental unit of communication in the mesh.
-- **`packetId`**: Unique identifier for loop prevention.
-- **`priority`**: Enum (Low to Critical). Critical packets (SOS) get routing priority.
-- **`ttl`**: Number of hops remaining.
-- **`isGatewayRelay`**: Flag to indicate the packet needs internet delivery.
+- **`senderPublicKey`**: Required for cryptographic verification of every hop.
+- **`priority`**: Critical (SOS) packets bypass standard queues.
+- **`isGatewayRelay`**: Triggers internet bridging when received by a Gateway Node.
 
-## Multi-hop Flow
-1. **Device A** sends a packet.
-2. **Device B** (in range) receives it.
-3. **RoutingEngine** on Device B checks `shouldForward()`.
-4. If true, `RoutingEngine` selects the best next hop from connected peers.
-5. **Device B** forwards the packet.
-6. Process repeats until the packet reaches its destination or a Gateway Node.
+## Protocol Flow
+
+### Multi-hop Transmission
+1. **Source** signs the payload and broadcasts the `MeshPacket`.
+2. **Intermediate Node** receives, verifies signature, decrements TTL, and re-broadcasts if `RoutingEngine` approves.
+3. **Gateway Node** receives packet with `isGatewayRelay: true`, verifies, and bridges to internet via fallback APIs.
+
+### Secure Direct Messaging
+1. **Handshake:** Nodes discover each other's `senderPublicKey` from standard mesh heartbeats/SOS.
+2. **Derivation:** `MeshCubit` uses the local private key and peer's public key to derive a shared secret.
+3. **Encryption:** Message is encrypted with AES-GCM and sent as a targeted `MeshPacket`.
+4. **Reception:** Only the node with the matching private key can decrypt the payload.

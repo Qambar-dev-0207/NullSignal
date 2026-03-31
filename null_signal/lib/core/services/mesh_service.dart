@@ -20,6 +20,9 @@ abstract class MeshService {
   /// Initiate connection to a specific device
   Future<void> connect(MeshDevice device);
   
+  /// Reconnect to a previously known device
+  Future<void> reconnect(String deviceId);
+  
   /// Send a packet to the mesh (broadcast or targeted)
   Future<void> sendPacket(MeshPacket packet);
   

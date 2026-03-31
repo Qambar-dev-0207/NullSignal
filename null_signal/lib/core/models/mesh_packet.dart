@@ -23,6 +23,7 @@ class MeshPacket {
   final String packetId;
   
   final String senderId;
+  final String senderPublicKey;
   final String? receiverId; // Null for broadcast
   
   final String payload; // Encrypted AES-256
@@ -42,6 +43,7 @@ class MeshPacket {
   MeshPacket({
     required this.packetId,
     required this.senderId,
+    required this.senderPublicKey,
     this.receiverId,
     required this.payload,
     required this.signature,

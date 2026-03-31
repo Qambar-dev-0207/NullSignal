@@ -58,18 +58,23 @@ const MeshPacketSchema = CollectionSchema(
       name: r'senderId',
       type: IsarType.string,
     ),
-    r'signature': PropertySchema(
+    r'senderPublicKey': PropertySchema(
       id: 8,
+      name: r'senderPublicKey',
+      type: IsarType.string,
+    ),
+    r'signature': PropertySchema(
+      id: 9,
       name: r'signature',
       type: IsarType.string,
     ),
     r'timestamp': PropertySchema(
-      id: 9,
+      id: 10,
       name: r'timestamp',
       type: IsarType.long,
     ),
     r'ttl': PropertySchema(
-      id: 10,
+      id: 11,
       name: r'ttl',
       type: IsarType.long,
     )
@@ -117,6 +122,7 @@ int _meshPacketEstimateSize(
     }
   }
   bytesCount += 3 + object.senderId.length * 3;
+  bytesCount += 3 + object.senderPublicKey.length * 3;
   bytesCount += 3 + object.signature.length * 3;
   return bytesCount;
 }
@@ -135,9 +141,10 @@ void _meshPacketSerialize(
   writer.writeByte(offsets[5], object.priority.index);
   writer.writeString(offsets[6], object.receiverId);
   writer.writeString(offsets[7], object.senderId);
-  writer.writeString(offsets[8], object.signature);
-  writer.writeLong(offsets[9], object.timestamp);
-  writer.writeLong(offsets[10], object.ttl);
+  writer.writeString(offsets[8], object.senderPublicKey);
+  writer.writeString(offsets[9], object.signature);
+  writer.writeLong(offsets[10], object.timestamp);
+  writer.writeLong(offsets[11], object.ttl);
 }
 
 MeshPacket _meshPacketDeserialize(
@@ -157,9 +164,10 @@ MeshPacket _meshPacketDeserialize(
             PacketPriority.low,
     receiverId: reader.readStringOrNull(offsets[6]),
     senderId: reader.readString(offsets[7]),
-    signature: reader.readString(offsets[8]),
-    timestamp: reader.readLong(offsets[9]),
-    ttl: reader.readLong(offsets[10]),
+    senderPublicKey: reader.readString(offsets[8]),
+    signature: reader.readString(offsets[9]),
+    timestamp: reader.readLong(offsets[10]),
+    ttl: reader.readLong(offsets[11]),
   );
   object.id = id;
   return object;
@@ -192,8 +200,10 @@ P _meshPacketDeserializeProp<P>(
     case 8:
       return (reader.readString(offset)) as P;
     case 9:
-      return (reader.readLong(offset)) as P;
+      return (reader.readString(offset)) as P;
     case 10:
+      return (reader.readLong(offset)) as P;
+    case 11:
       return (reader.readLong(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
@@ -1200,6 +1210,142 @@ extension MeshPacketQueryFilter
     });
   }
 
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyEqualTo(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'senderPublicKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyGreaterThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'senderPublicKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyLessThan(
+    String value, {
+    bool include = false,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'senderPublicKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyBetween(
+    String lower,
+    String upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'senderPublicKey',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyStartsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.startsWith(
+        property: r'senderPublicKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyEndsWith(
+    String value, {
+    bool caseSensitive = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.endsWith(
+        property: r'senderPublicKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyContains(String value, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.contains(
+        property: r'senderPublicKey',
+        value: value,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyMatches(String pattern, {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.matches(
+        property: r'senderPublicKey',
+        wildcard: pattern,
+        caseSensitive: caseSensitive,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyIsEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'senderPublicKey',
+        value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      senderPublicKeyIsNotEmpty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        property: r'senderPublicKey',
+        value: '',
+      ));
+    });
+  }
+
   QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition> signatureEqualTo(
     String value, {
     bool caseSensitive = true,
@@ -1547,6 +1693,19 @@ extension MeshPacketQuerySortBy
     });
   }
 
+  QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> sortBySenderPublicKey() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'senderPublicKey', Sort.asc);
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy>
+      sortBySenderPublicKeyDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'senderPublicKey', Sort.desc);
+    });
+  }
+
   QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> sortBySignature() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'signature', Sort.asc);
@@ -1695,6 +1854,19 @@ extension MeshPacketQuerySortThenBy
     });
   }
 
+  QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> thenBySenderPublicKey() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'senderPublicKey', Sort.asc);
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy>
+      thenBySenderPublicKeyDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'senderPublicKey', Sort.desc);
+    });
+  }
+
   QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> thenBySignature() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'signature', Sort.asc);
@@ -1786,6 +1958,14 @@ extension MeshPacketQueryWhereDistinct
     });
   }
 
+  QueryBuilder<MeshPacket, MeshPacket, QDistinct> distinctBySenderPublicKey(
+      {bool caseSensitive = true}) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'senderPublicKey',
+          caseSensitive: caseSensitive);
+    });
+  }
+
   QueryBuilder<MeshPacket, MeshPacket, QDistinct> distinctBySignature(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -1863,6 +2043,12 @@ extension MeshPacketQueryProperty
     });
   }
 
+  QueryBuilder<MeshPacket, String, QQueryOperations> senderPublicKeyProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'senderPublicKey');
+    });
+  }
+
   QueryBuilder<MeshPacket, String, QQueryOperations> signatureProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'signature');
@@ -1889,6 +2075,7 @@ extension MeshPacketQueryProperty
 MeshPacket _$MeshPacketFromJson(Map<String, dynamic> json) => MeshPacket(
       packetId: json['packetId'] as String,
       senderId: json['senderId'] as String,
+      senderPublicKey: json['senderPublicKey'] as String,
       receiverId: json['receiverId'] as String?,
       payload: json['payload'] as String,
       signature: json['signature'] as String,
@@ -1905,6 +2092,7 @@ Map<String, dynamic> _$MeshPacketToJson(MeshPacket instance) =>
       'id': instance.id,
       'packetId': instance.packetId,
       'senderId': instance.senderId,
+      'senderPublicKey': instance.senderPublicKey,
       'receiverId': instance.receiverId,
       'payload': instance.payload,
       'signature': instance.signature,

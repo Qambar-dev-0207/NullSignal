@@ -38,6 +38,18 @@ class AndroidAIService implements AIService {
   }
 
   @override
+  Future<String> chat(String message) async {
+    try {
+      final String result = await _channel.invokeMethod('generateResponse', {
+        'prompt': message,
+      });
+      return result;
+    } on PlatformException catch (e) {
+      return 'Error in chat: ${e.message}';
+    }
+  }
+
+  @override
   Future<void> dispose() async {
     // Android AICore handles its own resource management
   }
