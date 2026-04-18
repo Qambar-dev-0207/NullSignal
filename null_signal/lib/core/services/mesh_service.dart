@@ -1,5 +1,6 @@
 import 'package:null_signal/core/models/mesh_packet.dart';
 import 'package:null_signal/features/mesh/domain/entities/mesh_device.dart';
+import 'package:null_signal/core/models/peer.dart';
 
 abstract class MeshService {
   /// Unique identifier for this device in the mesh
@@ -10,6 +11,9 @@ abstract class MeshService {
   
   /// Stream of incoming packets from the mesh
   Stream<MeshPacket> get incomingPackets;
+
+  /// Stream of known peers from history
+  Stream<List<Peer>> get peersStream;
   
   /// Start advertising and discovery
   Future<void> start();

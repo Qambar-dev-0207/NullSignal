@@ -1,13 +1,33 @@
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:null_signal/core/services/security_service.dart';
 import 'package:cryptography/cryptography.dart';
-import 'dart:convert';
+import 'package:isar/isar.dart';
+import 'package:null_signal/core/models/identity.dart';
 
 void main() {
   late SecurityService securityService;
+  late Isar isar;
+  late Directory tempDir;
 
-  setUp(() {
-    securityService = SecurityService();
+  setUpAll(() async {
+    await Isar.initializeIsarCore(download: true);
+  });
+
+  setUp(() async {
+    tempDir = Directory.systemTemp.createTempSync('isar_security_test');
+    isar = await Isar.open(
+      [IdentitySchema],
+      directory: tempDir.path,
+    );
+    securityService = SecurityService(isar);
+  });
+
+  tearDown(() async {
+    await isar.close(deleteFromDisk: true);
+    if (tempDir.existsSync()) {
+      tempDir.deleteSync(recursive: true);
+    }
   });
 
   group('SecurityService E2EE & Signatures', () {
@@ -57,6 +77,32 @@ void main() {
       // Bob decrypts Alice's message
       final decrypted = await securityService.decryptE2E(encrypted, bobShared);
       expect(decrypted, equals(secretMessage));
+    });
+  });
+
+  group('SecurityService Identity Persistence', () {
+    test('getOrCreateIdentity: Creates new identity when none exists', () async {
+      final identity = await securityService.getOrCreateIdentity();
+      expect(identity, isNotNull);
+      expect(securityService.deviceId, startsWith('Node_'));
+      
+      // Verify persistence
+      final stored = await isar.identitys.where().findFirst();
+      expect(stored, isNotNull);
+      expect(stored?.deviceId, equals(securityService.deviceId));
+    });
+
+    test('getOrCreateIdentity: Returns existing identity when found', () async {
+      // Manually create one
+      final seed = await Ed25519().newKeyPair();
+      final privateKey = await seed.extractPrivateKeyBytes();
+      final existing = Identity(deviceId: 'Node_existing', privateKeySeed: privateKey);
+      
+      await isar.writeTxn(() => isar.identitys.put(existing));
+
+      final identity = await securityService.getOrCreateIdentity();
+      expect(identity, isNotNull);
+      expect(securityService.deviceId, equals('Node_existing'));
     });
   });
 }

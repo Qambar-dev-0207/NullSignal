@@ -37,44 +37,50 @@ const MeshPacketSchema = CollectionSchema(
       name: r'packetId',
       type: IsarType.string,
     ),
-    r'payload': PropertySchema(
+    r'packetType': PropertySchema(
       id: 4,
+      name: r'packetType',
+      type: IsarType.byte,
+      enumMap: _MeshPacketpacketTypeEnumValueMap,
+    ),
+    r'payload': PropertySchema(
+      id: 5,
       name: r'payload',
       type: IsarType.string,
     ),
     r'priority': PropertySchema(
-      id: 5,
+      id: 6,
       name: r'priority',
       type: IsarType.byte,
       enumMap: _MeshPacketpriorityEnumValueMap,
     ),
     r'receiverId': PropertySchema(
-      id: 6,
+      id: 7,
       name: r'receiverId',
       type: IsarType.string,
     ),
     r'senderId': PropertySchema(
-      id: 7,
+      id: 8,
       name: r'senderId',
       type: IsarType.string,
     ),
     r'senderPublicKey': PropertySchema(
-      id: 8,
+      id: 9,
       name: r'senderPublicKey',
       type: IsarType.string,
     ),
     r'signature': PropertySchema(
-      id: 9,
+      id: 10,
       name: r'signature',
       type: IsarType.string,
     ),
     r'timestamp': PropertySchema(
-      id: 10,
+      id: 11,
       name: r'timestamp',
       type: IsarType.long,
     ),
     r'ttl': PropertySchema(
-      id: 11,
+      id: 12,
       name: r'ttl',
       type: IsarType.long,
     )
@@ -137,14 +143,15 @@ void _meshPacketSerialize(
   writer.writeDouble(offsets[1], object.latitude);
   writer.writeDouble(offsets[2], object.longitude);
   writer.writeString(offsets[3], object.packetId);
-  writer.writeString(offsets[4], object.payload);
-  writer.writeByte(offsets[5], object.priority.index);
-  writer.writeString(offsets[6], object.receiverId);
-  writer.writeString(offsets[7], object.senderId);
-  writer.writeString(offsets[8], object.senderPublicKey);
-  writer.writeString(offsets[9], object.signature);
-  writer.writeLong(offsets[10], object.timestamp);
-  writer.writeLong(offsets[11], object.ttl);
+  writer.writeByte(offsets[4], object.packetType.index);
+  writer.writeString(offsets[5], object.payload);
+  writer.writeByte(offsets[6], object.priority.index);
+  writer.writeString(offsets[7], object.receiverId);
+  writer.writeString(offsets[8], object.senderId);
+  writer.writeString(offsets[9], object.senderPublicKey);
+  writer.writeString(offsets[10], object.signature);
+  writer.writeLong(offsets[11], object.timestamp);
+  writer.writeLong(offsets[12], object.ttl);
 }
 
 MeshPacket _meshPacketDeserialize(
@@ -158,16 +165,19 @@ MeshPacket _meshPacketDeserialize(
     latitude: reader.readDouble(offsets[1]),
     longitude: reader.readDouble(offsets[2]),
     packetId: reader.readString(offsets[3]),
-    payload: reader.readString(offsets[4]),
+    packetType:
+        _MeshPacketpacketTypeValueEnumMap[reader.readByteOrNull(offsets[4])] ??
+            PacketType.text,
+    payload: reader.readString(offsets[5]),
     priority:
-        _MeshPacketpriorityValueEnumMap[reader.readByteOrNull(offsets[5])] ??
+        _MeshPacketpriorityValueEnumMap[reader.readByteOrNull(offsets[6])] ??
             PacketPriority.low,
-    receiverId: reader.readStringOrNull(offsets[6]),
-    senderId: reader.readString(offsets[7]),
-    senderPublicKey: reader.readString(offsets[8]),
-    signature: reader.readString(offsets[9]),
-    timestamp: reader.readLong(offsets[10]),
-    ttl: reader.readLong(offsets[11]),
+    receiverId: reader.readStringOrNull(offsets[7]),
+    senderId: reader.readString(offsets[8]),
+    senderPublicKey: reader.readString(offsets[9]),
+    signature: reader.readString(offsets[10]),
+    timestamp: reader.readLong(offsets[11]),
+    ttl: reader.readLong(offsets[12]),
   );
   object.id = id;
   return object;
@@ -189,27 +199,47 @@ P _meshPacketDeserializeProp<P>(
     case 3:
       return (reader.readString(offset)) as P;
     case 4:
-      return (reader.readString(offset)) as P;
+      return (_MeshPacketpacketTypeValueEnumMap[
+              reader.readByteOrNull(offset)] ??
+          PacketType.text) as P;
     case 5:
+      return (reader.readString(offset)) as P;
+    case 6:
       return (_MeshPacketpriorityValueEnumMap[reader.readByteOrNull(offset)] ??
           PacketPriority.low) as P;
-    case 6:
-      return (reader.readStringOrNull(offset)) as P;
     case 7:
-      return (reader.readString(offset)) as P;
+      return (reader.readStringOrNull(offset)) as P;
     case 8:
       return (reader.readString(offset)) as P;
     case 9:
       return (reader.readString(offset)) as P;
     case 10:
-      return (reader.readLong(offset)) as P;
+      return (reader.readString(offset)) as P;
     case 11:
+      return (reader.readLong(offset)) as P;
+    case 12:
       return (reader.readLong(offset)) as P;
     default:
       throw IsarError('Unknown property with id $propertyId');
   }
 }
 
+const _MeshPacketpacketTypeEnumValueMap = {
+  'text': 0,
+  'sos': 1,
+  'hazardMap': 2,
+  'crowdAlert': 3,
+  'seismicEvent': 4,
+  'resourceExchange': 5,
+};
+const _MeshPacketpacketTypeValueEnumMap = {
+  0: PacketType.text,
+  1: PacketType.sos,
+  2: PacketType.hazardMap,
+  3: PacketType.crowdAlert,
+  4: PacketType.seismicEvent,
+  5: PacketType.resourceExchange,
+};
 const _MeshPacketpriorityEnumValueMap = {
   'low': 0,
   'medium': 1,
@@ -733,6 +763,61 @@ extension MeshPacketQueryFilter
       return query.addFilterCondition(FilterCondition.greaterThan(
         property: r'packetId',
         value: '',
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition> packetTypeEqualTo(
+      PacketType value) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.equalTo(
+        property: r'packetType',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      packetTypeGreaterThan(
+    PacketType value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.greaterThan(
+        include: include,
+        property: r'packetType',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition>
+      packetTypeLessThan(
+    PacketType value, {
+    bool include = false,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.lessThan(
+        include: include,
+        property: r'packetType',
+        value: value,
+      ));
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterFilterCondition> packetTypeBetween(
+    PacketType lower,
+    PacketType upper, {
+    bool includeLower = true,
+    bool includeUpper = true,
+  }) {
+    return QueryBuilder.apply(this, (query) {
+      return query.addFilterCondition(FilterCondition.between(
+        property: r'packetType',
+        lower: lower,
+        includeLower: includeLower,
+        upper: upper,
+        includeUpper: includeUpper,
       ));
     });
   }
@@ -1645,6 +1730,18 @@ extension MeshPacketQuerySortBy
     });
   }
 
+  QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> sortByPacketType() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'packetType', Sort.asc);
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> sortByPacketTypeDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'packetType', Sort.desc);
+    });
+  }
+
   QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> sortByPayload() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'payload', Sort.asc);
@@ -1806,6 +1903,18 @@ extension MeshPacketQuerySortThenBy
     });
   }
 
+  QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> thenByPacketType() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'packetType', Sort.asc);
+    });
+  }
+
+  QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> thenByPacketTypeDesc() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addSortBy(r'packetType', Sort.desc);
+    });
+  }
+
   QueryBuilder<MeshPacket, MeshPacket, QAfterSortBy> thenByPayload() {
     return QueryBuilder.apply(this, (query) {
       return query.addSortBy(r'payload', Sort.asc);
@@ -1931,6 +2040,12 @@ extension MeshPacketQueryWhereDistinct
     });
   }
 
+  QueryBuilder<MeshPacket, MeshPacket, QDistinct> distinctByPacketType() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addDistinctBy(r'packetType');
+    });
+  }
+
   QueryBuilder<MeshPacket, MeshPacket, QDistinct> distinctByPayload(
       {bool caseSensitive = true}) {
     return QueryBuilder.apply(this, (query) {
@@ -2018,6 +2133,12 @@ extension MeshPacketQueryProperty
     });
   }
 
+  QueryBuilder<MeshPacket, PacketType, QQueryOperations> packetTypeProperty() {
+    return QueryBuilder.apply(this, (query) {
+      return query.addPropertyName(r'packetType');
+    });
+  }
+
   QueryBuilder<MeshPacket, String, QQueryOperations> payloadProperty() {
     return QueryBuilder.apply(this, (query) {
       return query.addPropertyName(r'payload');
@@ -2077,6 +2198,9 @@ MeshPacket _$MeshPacketFromJson(Map<String, dynamic> json) => MeshPacket(
       senderId: json['senderId'] as String,
       senderPublicKey: json['senderPublicKey'] as String,
       receiverId: json['receiverId'] as String?,
+      packetType:
+          $enumDecodeNullable(_$PacketTypeEnumMap, json['packetType']) ??
+              PacketType.text,
       payload: json['payload'] as String,
       signature: json['signature'] as String,
       timestamp: (json['timestamp'] as num).toInt(),
@@ -2094,6 +2218,7 @@ Map<String, dynamic> _$MeshPacketToJson(MeshPacket instance) =>
       'senderId': instance.senderId,
       'senderPublicKey': instance.senderPublicKey,
       'receiverId': instance.receiverId,
+      'packetType': _$PacketTypeEnumMap[instance.packetType]!,
       'payload': instance.payload,
       'signature': instance.signature,
       'timestamp': instance.timestamp,
@@ -2103,6 +2228,15 @@ Map<String, dynamic> _$MeshPacketToJson(MeshPacket instance) =>
       'longitude': instance.longitude,
       'isGatewayRelay': instance.isGatewayRelay,
     };
+
+const _$PacketTypeEnumMap = {
+  PacketType.text: 'TEXT',
+  PacketType.sos: 'SOS',
+  PacketType.hazardMap: 'HAZARD_MAP',
+  PacketType.crowdAlert: 'CROWD_ALERT',
+  PacketType.seismicEvent: 'SEISMIC_EVENT',
+  PacketType.resourceExchange: 'RESOURCE_EXCHANGE',
+};
 
 const _$PacketPriorityEnumMap = {
   PacketPriority.low: 0,

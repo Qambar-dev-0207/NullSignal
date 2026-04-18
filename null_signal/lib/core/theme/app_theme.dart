@@ -42,6 +42,8 @@ class NullSignalColors extends ThemeExtension<NullSignalColors> {
   Color get surfaceLow => surfaceContainerLow;
   Color get surfaceHighest => surfaceContainerHighest;
   Color get surfaceLowest => surfaceContainerLowest;
+  Color get surface => background;
+  Color get warning => Colors.orange;
 
   @override
   NullSignalColors copyWith({
@@ -101,31 +103,23 @@ class NullSignalColors extends ThemeExtension<NullSignalColors> {
 }
 
 class AppTheme {
-  // Exact Hex Colors from Stitch light_mode files
-  static const Color background = Color(0xFFFBFBFF); // Lighter background
-  static const Color onSurface = Color(0xFF231A06);
-  static const Color primary = Color(0xFF00327D);
-  static const Color primaryContainer = Color(0xFF0047AB);
-  static const Color secondary = Color(0xFF4E5E85);
-  static const Color surfaceDim = Color(0xFFEAD8B8);
-  static const Color surfaceContainerHighest = Color(0xFFF3E0C0);
-  static const Color surfaceContainerHigh = Color(0xFFF9E6C5);
-  static const Color surfaceContainer = Color(0xFFFFECCB);
-  static const Color surfaceContainerLow = Color(0xFFFFF2DE);
-  static const Color surfaceContainerLowest = Color(0xFFFBFBFF);
-  static const Color error = Color(0xFFBA1A1A);
-  static const Color errorContainer = Color(0xFFFFDAD6);
-  static const Color outlineVariant = Color(0xFFC3C6D5);
+  // NullSignal Identity: Beige and Red Tactical Aesthetic
+  static const Color background = Color(0xFFF5E6D3); // Soft Beige
+  static const Color onSurface = Color(0xFF1A1A1A); // Dark Grey/Black
+  static const Color primary = Color(0xFFB71C1C); // Tactical Red
+  static const Color primaryContainer = Color(0xFFD32F2F);
+  static const Color secondary = Color(0xFFD7CCC8);
+  static const Color surfaceDim = Color(0xFFEFEBE9);
+  static const Color surfaceContainerHighest = Color(0xFFE0E0E0);
+  static const Color surfaceContainerHigh = Color(0xFFECEFF1);
+  static const Color surfaceContainer = Color(0xFFF5F5F5);
+  static const Color surfaceContainerLow = Color(0xFFFAFAFA);
+  static const Color surfaceContainerLowest = Color(0xFFFFFFFF);
+  static const Color error = Color(0xFFD32F2F);
+  static const Color errorContainer = Color(0xFFFFEBEE);
+  static const Color outlineVariant = Color(0xFFBDBDBD);
 
-  // Static Aliases for missing colors used in the UI
-  static const Color voidBlack = Color(0xFFE5D3B3); // Replaced Black with user requested color
-  static const Color primaryBlue = primary;
-  static const Color crimsonCarrot = error;
-  static const Color surfaceLow = surfaceContainerLow;
-  static const Color surfaceHighest = surfaceContainerHighest;
-  static const Color surfaceLowest = surfaceContainerLowest;
-
-  static ThemeData get lightTheme {
+  static ThemeData get normalTheme {
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
@@ -148,44 +142,56 @@ class AppTheme {
           outlineVariant: outlineVariant,
         ),
       ],
-      textTheme: GoogleFonts.spaceGroteskTextTheme(
-        const TextTheme(
+      textTheme: GoogleFonts.shareTechMonoTextTheme(
+        TextTheme(
           displayLarge: TextStyle(
-            fontSize: 64,
-            fontWeight: FontWeight.w800,
-            color: onSurface,
-            letterSpacing: -3.0,
-          ),
-          headlineMedium: TextStyle(
-            fontSize: 28,
-            fontWeight: FontWeight.w700,
-            color: onSurface,
+            fontSize: 40,
+            fontWeight: FontWeight.w900,
+            color: primary,
             letterSpacing: -1.0,
           ),
-          titleSmall: TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
+          headlineLarge: TextStyle(
+            fontSize: 28,
+            fontWeight: FontWeight.w800,
+            color: primary,
+            letterSpacing: 1.0,
+          ),
+          headlineMedium: TextStyle(
+            fontSize: 22,
+            fontWeight: FontWeight.w700,
             color: onSurface,
           ),
-          bodyMedium: TextStyle(
-            fontSize: 15,
+          titleMedium: TextStyle(
+            fontSize: 16,
+            fontWeight: FontWeight.w600,
+            color: primary,
+            letterSpacing: 1.2,
+          ),
+          bodyLarge: TextStyle(
+            fontSize: 14,
             fontWeight: FontWeight.w400,
             color: onSurface,
             height: 1.5,
           ),
+          bodyMedium: TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.w400,
+            color: onSurface.withValues(alpha: 0.7),
+          ),
           labelSmall: TextStyle(
-            fontSize: 11,
-            fontWeight: FontWeight.w700,
-            color: onSurface,
+            fontSize: 9,
+            fontWeight: FontWeight.w800,
+            color: primary,
             letterSpacing: 2.0,
           ),
         ),
       ),
       cardTheme: CardThemeData(
-        color: surfaceContainerLowest,
+        color: surfaceContainerHigh,
         elevation: 0,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(4),
+          side: const BorderSide(color: Color(0xFF333333), width: 1),
         ),
       ),
       appBarTheme: const AppBarTheme(
@@ -193,28 +199,30 @@ class AppTheme {
         elevation: 0,
         centerTitle: false,
         titleTextStyle: TextStyle(
-          color: onSurface,
-          fontSize: 20,
+          color: primary,
+          fontSize: 18,
           fontWeight: FontWeight.w900,
-          letterSpacing: 2.0,
+          letterSpacing: 3.0,
+          fontFamily: 'ShareTechMono',
         ),
         iconTheme: IconThemeData(color: primary),
       ),
       bottomNavigationBarTheme: const BottomNavigationBarThemeData(
         backgroundColor: background,
-        selectedItemColor: primaryContainer,
-        unselectedItemColor: Color(0x66231A06),
+        selectedItemColor: primary,
+        unselectedItemColor: Color(0xFF424242),
         elevation: 0,
         type: BottomNavigationBarType.fixed,
       ),
     );
   }
 
-  static ThemeData get normalTheme => lightTheme;
-  static ThemeData get panicTheme => lightTheme.copyWith(
+  static ThemeData get lightTheme => normalTheme;
+  static ThemeData get panicTheme => normalTheme.copyWith(
     colorScheme: ColorScheme.fromSeed(
       seedColor: error,
       primary: error,
+      brightness: Brightness.dark,
     ),
   );
 }

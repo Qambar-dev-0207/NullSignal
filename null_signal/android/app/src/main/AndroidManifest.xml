@@ -20,6 +20,19 @@
         android:label="null_signal"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        
+        <!-- Enable AICore GenAI features for Gemini Nano on Android 14+ -->
+        <meta-data
+            android:name="com.google.android.aicore.ENABLE_GENAI_FEATURES"
+            android:value="true" />
+        <meta-data
+            android:name="com.google.mlkit.genai.model_name"
+            android:value="gemini-nano" />
+        
+        <property
+            android:name="com.google.android.aicore.ENABLE_GENAI_FEATURES"
+            android:value="true" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"

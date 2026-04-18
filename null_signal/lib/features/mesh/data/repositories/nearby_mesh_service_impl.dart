@@ -1,31 +1,45 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:io';
 import 'dart:developer' as developer;
 import 'package:nearby_connections/nearby_connections.dart';
+import 'package:isar/isar.dart';
+import 'package:http/http.dart' as http;
 import 'package:null_signal/core/models/mesh_packet.dart';
+import 'package:null_signal/core/models/peer.dart';
+import 'package:null_signal/core/models/contact.dart';
 import 'package:null_signal/core/services/mesh_service.dart';
 import 'package:null_signal/core/services/gateway_monitor.dart';
 import 'package:null_signal/core/services/security_service.dart';
+import 'package:null_signal/core/services/satellite_gateway_service.dart';
 import 'package:null_signal/features/mesh/domain/entities/mesh_device.dart';
 import 'package:null_signal/features/mesh/domain/repositories/routing_engine.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:cryptography/cryptography.dart';
+import 'package:uuid/uuid.dart';
 
 class NearbyMeshServiceImpl implements MeshService {
   final GatewayMonitor _gatewayMonitor;
   final SecurityService _securityService;
+  final SatelliteGatewayService? _satelliteService;
+  final Isar _isar;
   final Strategy _strategy = Strategy.P2P_CLUSTER;
   final String _serviceId = "com.nullsignal.p2p";
-  final String _userName = "User_${DateTime.now().millisecondsSinceEpoch % 1000}";
-  final RoutingEngine _routingEngine = RoutingEngine();
+  late final RoutingEngine _routingEngine;
   KeyPair? _myKeyPair;
+  Timer? _heartbeatTimer;
+  Timer? _pruningTimer;
+  final Set<String> _connectingDeviceIds = {};
 
-  NearbyMeshServiceImpl(this._gatewayMonitor, this._securityService);
+  NearbyMeshServiceImpl(this._gatewayMonitor, this._securityService, this._isar, {SatelliteGatewayService? satelliteService}) 
+    : _satelliteService = satelliteService {
+    _routingEngine = RoutingEngine(_isar);
+  }
 
   @override
-  String get deviceId => _userName;
+  String get deviceId => _securityService.deviceId;
 
   final BehaviorSubject<List<MeshDevice>> _devicesSubject = BehaviorSubject<List<MeshDevice>>.seeded([]);
   final PublishSubject<MeshPacket> _incomingPacketsSubject = PublishSubject<MeshPacket>();
@@ -39,18 +53,40 @@ class NearbyMeshServiceImpl implements MeshService {
   Stream<MeshPacket> get incomingPackets => _incomingPacketsSubject.stream;
 
   @override
+  Stream<List<Peer>> get peersStream => _isar.peers.where().sortByLastSeenDesc().watch(fireImmediately: true);
+
+  @override
   List<MeshDevice> get currentDevices => _devicesSubject.value;
 
   Future<bool> _checkPermissions() async {
-    Map<Permission, PermissionStatus> statuses = await [
-      Permission.bluetoothScan,
-      Permission.bluetoothAdvertise,
-      Permission.bluetoothConnect,
+    List<Permission> permissions = [
       Permission.location,
       Permission.nearbyWifiDevices,
-    ].request();
+    ];
 
-    return statuses.values.every((status) => status.isGranted);
+    if (Platform.isAndroid) {
+      permissions.addAll([
+        Permission.bluetoothScan,
+        Permission.bluetoothAdvertise,
+        Permission.bluetoothConnect,
+      ]);
+    }
+
+    Map<Permission, PermissionStatus> statuses = await permissions.request();
+    
+    bool essentialGranted = statuses[Permission.location]?.isGranted ?? false;
+    if (Platform.isAndroid) {
+      essentialGranted = essentialGranted && 
+        (statuses[Permission.bluetoothScan]?.isGranted ?? false) &&
+        (statuses[Permission.bluetoothAdvertise]?.isGranted ?? false) &&
+        (statuses[Permission.bluetoothConnect]?.isGranted ?? false);
+    }
+
+    if (!essentialGranted) {
+      developer.log('MeshService: Essential permissions missing: ${statuses.entries.where((e) => !e.value.isGranted).map((e) => e.key).toList()}', name: 'MeshService');
+    }
+
+    return essentialGranted;
   }
 
   @override
@@ -58,11 +94,10 @@ class NearbyMeshServiceImpl implements MeshService {
     developer.log('MeshService: Starting...', name: 'MeshService');
     if (!await _checkPermissions()) {
       developer.log('MeshService: Permissions denied', name: 'MeshService');
-      return;
     }
 
-    _myKeyPair ??= await _securityService.generateIdentity();
-    final advertisingName = _gatewayMonitor.isGateway ? "$_userName|G" : _userName;
+    _myKeyPair = await _securityService.getOrCreateIdentity();
+    final advertisingName = _gatewayMonitor.isGateway ? "$deviceId|G" : deviceId;
 
     // 1. Start Advertising
     try {
@@ -97,7 +132,7 @@ class NearbyMeshServiceImpl implements MeshService {
           _discoveredDevices[id] = device;
           _updateDevices();
           
-          // Auto-connect for mesh behavior
+          // AUTO-CONNECT logic for immediate mesh formation
           connect(device);
         },
         onEndpointLost: (id) {
@@ -111,72 +146,145 @@ class NearbyMeshServiceImpl implements MeshService {
     } catch (e) {
       developer.log('MeshService: Discovery failed: $e', name: 'MeshService');
     }
+
+    // 3. Start Heartbeat & Pruning
+    _startHeartbeat();
+    _startPruning();
+  }
+
+  void _startPruning() {
+    _pruningTimer?.cancel();
+    _pruningTimer = Timer.periodic(const Duration(hours: 1), (timer) {
+      _routingEngine.pruneSeenCache();
+    });
+  }
+
+  void _startHeartbeat() {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+      _sendHeartbeat();
+    });
+  }
+
+  Future<void> _sendHeartbeat() async {
+    if (currentDevices.where((d) => d.isConnected).isEmpty) return;
+    
+    final packetId = const Uuid().v4();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    
+    _myKeyPair ??= await _securityService.getOrCreateIdentity();
+    const payload = 'HEARTBEAT';
+    final signature = await _securityService.sign(payload, _myKeyPair!);
+    
+    final publicKey = await _myKeyPair!.extractPublicKey();
+    final publicKeyBase64 = base64.encode((publicKey as SimplePublicKey).bytes);
+
+    final packet = MeshPacket(
+      packetId: packetId,
+      senderId: deviceId,
+      senderPublicKey: publicKeyBase64,
+      payload: payload,
+      signature: signature,
+      timestamp: timestamp,
+      ttl: 1,
+      priority: PacketPriority.low,
+      latitude: 0.0,
+      longitude: 0.0,
+    );
+
+    sendPacket(packet);
   }
 
   void _onConnectionInitiated(String id, ConnectionInfo info) {
-    developer.log('MeshService: Connection initiated with $id (${info.endpointName})', name: 'MeshService');
-    // Accept all connections for decentralized mesh
+    developer.log('MeshService: Auto-accepting connection with $id', name: 'MeshService');
     Nearby().acceptConnection(
       id,
       onPayLoadRecieved: (id, payload) async {
-        developer.log('MeshService: Payload received from $id', name: 'MeshService');
         if (payload.type == PayloadType.BYTES) {
-          final jsonString = utf8.decode(payload.bytes!);
+          final bytes = payload.bytes;
+          if (bytes == null) return;
+          final jsonString = utf8.decode(bytes);
           try {
             final json = jsonDecode(jsonString);
             final packet = MeshPacket.fromJson(json);
-            developer.log('MeshService: Mesh packet received: ${packet.packetId} (Priority: ${packet.priority})', name: 'MeshService');
             
-            // 1. Convert packet.senderPublicKey from base64 to PublicKey
+            // 1. Validate Signature
             final publicKeyBytes = base64.decode(packet.senderPublicKey);
             final senderPublicKey = SimplePublicKey(publicKeyBytes, type: KeyPairType.ed25519);
-            
-            // Store public key for E2EE if we know this device
-            final device = _discoveredDevices[packet.senderId];
-            if (device != null && device.publicKey != packet.senderPublicKey) {
-              _discoveredDevices[packet.senderId] = device.copyWith(publicKey: packet.senderPublicKey);
-              _updateDevices();
-            }
-
-            // 2. Use SecurityService.verify() to validate the packet
             final isValid = await _securityService.verify(packet.payload, packet.signature, senderPublicKey);
             
-            if (!isValid) {
-              developer.log('MeshService: Invalid packet signature from ${packet.senderId}. DROPPING.', name: 'MeshService');
-              return;
+            if (!isValid) return;
+
+            // 2. Direct for us or Broadcast
+            final receiverId = packet.receiverId;
+            if (receiverId == deviceId || receiverId == null) {
+              if (packet.payload != 'HEARTBEAT') {
+                _incomingPacketsSubject.add(packet);
+              }
+              // If it's specifically for us, we don't need to check forwarding (though mesh typically floods)
+              if (receiverId == deviceId) return;
             }
 
-            // 3. If valid AND packet.isGatewayRelay is true AND gatewayMonitor.isGateway is true
+            // 3. Forwarding (Flood Routing with duplicate suppression)
+            if (!await _routingEngine.shouldForward(packet, deviceId)) return;
+
+            await _isar.writeTxn(() async {
+              final existingPeer = await _isar.peers.filter().deviceIdEqualTo(packet.senderId).findFirst();
+              if (existingPeer == null) {
+                final device = _discoveredDevices[id];
+                final newPeer = Peer(
+                  deviceId: packet.senderId,
+                  deviceName: device?.deviceName ?? 'Unknown Node',
+                  publicKey: packet.senderPublicKey,
+                  lastSeen: DateTime.now().millisecondsSinceEpoch,
+                );
+                await _isar.peers.put(newPeer);
+              } else {
+                final updatedPeer = existingPeer.copyWith(
+                  publicKey: packet.senderPublicKey,
+                  lastSeen: DateTime.now().millisecondsSinceEpoch,
+                );
+                await _isar.peers.put(updatedPeer);
+              }
+              await _isar.meshPackets.put(packet);
+            });
+
             if (packet.isGatewayRelay && _gatewayMonitor.isGateway) {
-              developer.log('GATEWAY: Bridging packet ${packet.packetId} to internet', name: 'MeshService');
+              _bridgeToInternet(packet);
             }
             
-            // Handle packet routing for multi-hop
-            if (_routingEngine.shouldForward(packet, _userName)) {
-              developer.log('MeshService: Forwarding packet ${packet.packetId}', name: 'MeshService');
-              final forwardedPacket = _routingEngine.decrementTtl(packet);
-              sendPacket(forwardedPacket);
-            }
+            final forwardedPacket = _routingEngine.decrementTtl(packet);
+            sendPacket(forwardedPacket);
             
-            _incomingPacketsSubject.add(packet);
-          } catch (e) {
-            developer.log('MeshService: Failed to parse mesh packet: $e', name: 'MeshService');
-          }
+            if (packet.payload != 'HEARTBEAT') {
+              _incomingPacketsSubject.add(packet);
+            }
+          } catch (_) {}
         }
       },
-      onPayloadTransferUpdate: (id, update) {
-        if (update.status == PayloadStatus.FAILURE) {
-          developer.log('MeshService: Payload transfer failed with $id', name: 'MeshService');
-        }
-      },
+      onPayloadTransferUpdate: (id, payloadTransferUpdate) {},
     );
   }
 
+  Future<void> _bridgeToInternet(MeshPacket packet) async {
+    try {
+      final url = Uri.parse('https://api.nullsignal.io/v1/sos/relay');
+      await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'packetId': packet.packetId,
+          'senderId': packet.senderId,
+          'coordinates': {'lat': packet.latitude, 'lon': packet.longitude},
+          'payload': packet.payload,
+          'timestamp': packet.timestamp,
+        }),
+      ).timeout(const Duration(seconds: 5));
+    } catch (_) {}
+  }
+
   void _onConnectionResult(String id, Status status) {
-    developer.log('MeshService: Connection result for $id: $status', name: 'MeshService');
     final existing = _discoveredDevices[id];
-    
-    // If it's a new device that initiated connection to us
     final device = existing ?? MeshDevice(deviceId: id, deviceName: 'Unknown', status: MeshDeviceStatus.connecting);
 
     MeshDeviceStatus newStatus;
@@ -194,7 +302,6 @@ class NearbyMeshServiceImpl implements MeshService {
   }
 
   void _onDisconnected(String id) {
-    developer.log('MeshService: Disconnected from $id', name: 'MeshService');
     final existing = _discoveredDevices[id];
     if (existing != null) {
       _discoveredDevices[id] = existing.copyWith(status: MeshDeviceStatus.disconnected);
@@ -208,7 +315,7 @@ class NearbyMeshServiceImpl implements MeshService {
 
   @override
   Future<void> stop() async {
-    developer.log('MeshService: Stopping...', name: 'MeshService');
+    _heartbeatTimer?.cancel();
     await Nearby().stopAdvertising();
     await Nearby().stopDiscovery();
     await Nearby().stopAllEndpoints();
@@ -218,42 +325,56 @@ class NearbyMeshServiceImpl implements MeshService {
 
   @override
   Future<void> connect(MeshDevice device) async {
-    developer.log('MeshService: Requesting connection to ${device.deviceId}', name: 'MeshService');
-    try {
-      await Nearby().requestConnection(
-        _userName,
-        device.deviceId,
-        onConnectionInitiated: _onConnectionInitiated,
-        onConnectionResult: _onConnectionResult,
-        onDisconnected: _onDisconnected,
-      );
-    } catch (e) {
-      developer.log('MeshService: Connection request failed: $e', name: 'MeshService');
+    if (_connectingDeviceIds.contains(device.deviceId) || device.isConnected) return;
+    
+    _connectingDeviceIds.add(device.deviceId);
+    int retries = 0;
+    const maxRetries = 2;
+
+    while (retries <= maxRetries) {
+      try {
+        await Nearby().requestConnection(
+          deviceId,
+          device.deviceId,
+          onConnectionInitiated: _onConnectionInitiated,
+          onConnectionResult: (id, status) {
+            _connectingDeviceIds.remove(id);
+            _onConnectionResult(id, status);
+          },
+          onDisconnected: (id) {
+            _connectingDeviceIds.remove(id);
+            _onDisconnected(id);
+          },
+        ).timeout(const Duration(seconds: 15));
+        return; // Success or initiated
+      } catch (e) {
+        retries++;
+        if (retries <= maxRetries) {
+          await Future.delayed(Duration(seconds: 2 * retries));
+        } else {
+          _connectingDeviceIds.remove(device.deviceId);
+          developer.log('MeshService: Failed to connect to ${device.deviceId} after $maxRetries retries', name: 'MeshService');
+        }
+      }
     }
   }
 
   @override
   Future<void> reconnect(String deviceId) async {
-    developer.log('MeshService: Attempting to reconnect to $deviceId', name: 'MeshService');
     try {
       await Nearby().requestConnection(
-        _userName,
+        this.deviceId,
         deviceId,
         onConnectionInitiated: _onConnectionInitiated,
         onConnectionResult: _onConnectionResult,
         onDisconnected: _onDisconnected,
-      );
-    } catch (e) {
-      developer.log('MeshService: Reconnection failed: $e', name: 'MeshService');
-    }
+      ).timeout(const Duration(seconds: 15));
+    } catch (_) {}
   }
 
   @override
   Future<void> sendPacket(MeshPacket packet) async {
-    developer.log('MeshService: Broadcasting packet ${packet.packetId} to ${currentDevices.length} nodes', name: 'MeshService');
-    
-    // Ensure the local PublicKey is attached to every packet sent.
-    _myKeyPair ??= await _securityService.generateIdentity();
+    _myKeyPair ??= await _securityService.getOrCreateIdentity();
     final publicKey = await _myKeyPair!.extractPublicKey();
     final publicKeyBase64 = base64.encode((publicKey as SimplePublicKey).bytes);
 
@@ -262,6 +383,7 @@ class NearbyMeshServiceImpl implements MeshService {
       senderId: packet.senderId,
       senderPublicKey: publicKeyBase64,
       receiverId: packet.receiverId,
+      packetType: packet.packetType,
       payload: packet.payload,
       signature: packet.signature,
       timestamp: packet.timestamp,
@@ -272,17 +394,29 @@ class NearbyMeshServiceImpl implements MeshService {
       isGatewayRelay: packet.isGatewayRelay,
     );
 
+    await _isar.writeTxn(() async {
+      await _isar.seenPackets.put(SeenPacket(packetId: packet.packetId, timestamp: packet.timestamp));
+      await _isar.meshPackets.put(packetWithPublicKey);
+    });
+
+    if (packet.isGatewayRelay && _gatewayMonitor.isGateway) {
+      _bridgeToInternet(packetWithPublicKey);
+    } else if (packet.isGatewayRelay && packet.priority == PacketPriority.critical && _satelliteService != null) {
+      _satelliteService.isSatelliteAvailable().then((available) {
+        if (available) {
+          _satelliteService.sendViaSatellite(packetWithPublicKey);
+        }
+      });
+    }
+
     final jsonString = jsonEncode(packetWithPublicKey.toJson());
     final bytes = Uint8List.fromList(utf8.encode(jsonString));
     
-    int sentCount = 0;
     for (final device in currentDevices) {
       if (device.isConnected) {
         await Nearby().sendBytesPayload(device.deviceId, bytes);
-        sentCount++;
       }
     }
-    developer.log('MeshService: Packet sent to $sentCount connected nodes', name: 'MeshService');
   }
 
   void dispose() {

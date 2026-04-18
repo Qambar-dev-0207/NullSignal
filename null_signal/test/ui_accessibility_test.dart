@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:isar/isar.dart';
+import 'package:mocktail/mocktail.dart';
 import 'package:null_signal/core/services/mesh_service.dart';
 import 'package:null_signal/core/services/security_service.dart';
 import 'package:null_signal/core/services/gateway_monitor.dart';
@@ -11,7 +13,17 @@ import 'package:null_signal/features/sos/presentation/bloc/ui_orchestrator_cubit
 import 'package:null_signal/features/sos/presentation/widgets/panic_button.dart';
 import 'package:null_signal/features/sos/presentation/pages/sos_screen.dart';
 
+class MockIsar extends Mock implements Isar {}
+
 void main() {
+  late MockIsar mockIsar;
+  late SecurityService securityService;
+
+  setUp(() {
+    mockIsar = MockIsar();
+    securityService = SecurityService(mockIsar);
+  });
+
   Widget createTestWidget(Widget child, {UIOrchestratorCubit? cubit}) {
     return BlocProvider.value(
       value: cubit ?? UIOrchestratorCubit(),
@@ -45,11 +57,14 @@ void main() {
     });
 
     testWidgets('SosScreen should show large SEND SOS button', (tester) async {
+      final gatewayMonitor = GatewayMonitor();
+      final meshService = NearbyMeshServiceImpl(gatewayMonitor, securityService, mockIsar);
+
       await tester.pumpWidget(
         MultiRepositoryProvider(
           providers: [
-            RepositoryProvider<MeshService>.value(value: NearbyMeshServiceImpl(GatewayMonitor(), SecurityService())),
-            RepositoryProvider<SecurityService>.value(value: SecurityService()),
+            RepositoryProvider<MeshService>.value(value: meshService),
+            RepositoryProvider<SecurityService>.value(value: securityService),
           ],
           child: MultiBlocProvider(
             providers: [

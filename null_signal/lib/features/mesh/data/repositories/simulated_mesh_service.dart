@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math';
+import 'package:isar/isar.dart';
 import 'package:null_signal/core/models/mesh_packet.dart';
+import 'package:null_signal/core/models/peer.dart';
 import 'package:null_signal/core/services/mesh_service.dart';
 import 'package:null_signal/features/mesh/domain/entities/mesh_device.dart';
 import 'package:null_signal/core/services/gateway_monitor.dart';
@@ -8,7 +10,6 @@ import 'package:null_signal/core/services/security_service.dart';
 import 'package:rxdart/rxdart.dart';
 
 class SimulatedMeshService implements MeshService {
-  final GatewayMonitor _gatewayMonitor;
   final SecurityService _securityService;
   final _random = Random();
   final BehaviorSubject<List<MeshDevice>> _devicesSubject = BehaviorSubject<List<MeshDevice>>.seeded([]);
@@ -17,16 +18,19 @@ class SimulatedMeshService implements MeshService {
   Timer? _simulationTimer;
   final Map<String, MeshDevice> _simulatedDevices = {};
 
-  SimulatedMeshService(this._gatewayMonitor, this._securityService);
+  SimulatedMeshService(GatewayMonitor gatewayMonitor, this._securityService, Isar isar);
 
   @override
-  String get deviceId => "LOCAL_NODE_HOST";
+  String get deviceId => _securityService.deviceId;
 
   @override
   Stream<List<MeshDevice>> get devicesStream => _devicesSubject.stream;
 
   @override
   Stream<MeshPacket> get incomingPackets => _incomingPacketsSubject.stream;
+
+  @override
+  Stream<List<Peer>> get peersStream => Stream.value([]);
 
   @override
   List<MeshDevice> get currentDevices => _devicesSubject.value;

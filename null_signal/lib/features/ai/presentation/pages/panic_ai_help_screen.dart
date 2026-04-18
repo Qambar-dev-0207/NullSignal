@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:null_signal/core/theme/app_theme.dart';
 import 'package:null_signal/core/theme/null_signal_widgets.dart';
+import 'package:null_signal/core/utils/animations.dart';
+import 'package:null_signal/features/ai/domain/entities/sector_summary.dart';
 import 'package:null_signal/features/ai/presentation/bloc/ai_cubit.dart';
 import 'package:null_signal/features/ai/data/models/chat_message.dart';
 
@@ -43,16 +45,22 @@ class _PanicAIHelpScreenState extends State<PanicAIHelpScreen> {
     return NullSignalScaffold(
       title: 'NullSignal',
       actions: [
-        Text(
-          'EMERGENCY AI',
-          style: textTheme.labelSmall?.copyWith(
-            color: colors.primaryContainer,
-            fontSize: 11,
-            letterSpacing: -0.5,
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+          decoration: BoxDecoration(
+            color: colors.primaryContainer.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: colors.primaryContainer.withValues(alpha: 0.2)),
+          ),
+          child: Text(
+            'SECURE AI',
+            style: textTheme.labelSmall?.copyWith(
+              color: colors.primaryContainer,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ),
-        const SizedBox(width: 16),
-        Icon(Icons.battery_charging_full, size: 20, color: colors.primary),
         const SizedBox(width: 24),
       ],
       body: BlocConsumer<AiCubit, AiState>(
@@ -63,7 +71,11 @@ class _PanicAIHelpScreenState extends State<PanicAIHelpScreen> {
         },
         builder: (context, state) {
           List<ChatMessage> history = [];
-          if (state is AiResponse) history = state.history;
+          List<SectorSummary> sectorSummaries = [];
+          if (state is AiResponse) {
+            history = state.history;
+            sectorSummaries = state.sectorSummaries;
+          }
           if (state is AiLoading) history = state.history;
           if (state is AiError) history = state.history;
 
@@ -71,51 +83,64 @@ class _PanicAIHelpScreenState extends State<PanicAIHelpScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 24),
-              _animateIn(child: _buildTerminalQuery(context, colors, textTheme), delay: 0),
+              FadeInAnimation(
+                child: _buildTerminalQuery(context, colors, textTheme),
+              ),
               const SizedBox(height: 24),
 
               Expanded(
                 child: ListView.builder(
                   controller: _scrollController,
                   padding: const EdgeInsets.only(bottom: 32),
-                  itemCount: history.length + (state is AiLoading ? 1 : 0) + 1,
+                  itemCount: history.length + (state is AiLoading ? 1 : 0) + (sectorSummaries.isNotEmpty ? 2 : 1),
                   itemBuilder: (context, index) {
                     if (index == 0) {
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'EMERGENCY FAQ',
-                                style: textTheme.labelSmall?.copyWith(
-                                  fontSize: 9,
-                                  color: colors.onSurface.withOpacity(0.4),
+                      return FadeInAnimation(
+                        delay: const Duration(milliseconds: 200),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'EMERGENCY PROTOCOLS',
+                                  style: textTheme.labelSmall?.copyWith(
+                                    fontSize: 9,
+                                    color: colors.onSurface.withValues(alpha: 0.4),
+                                    letterSpacing: 2.0,
+                                  ),
                                 ),
-                              ),
-                              Icon(Icons.emergency, color: colors.onSurface.withOpacity(0.4), size: 14),
+                                Icon(Icons.security, color: colors.onSurface.withValues(alpha: 0.2), size: 14),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+                            _buildProtocolGrid(context, colors, textTheme),
+                            const SizedBox(height: 32),
+                            if (sectorSummaries.isNotEmpty) ...[
+                              _buildSectorSummarySection(sectorSummaries, colors, textTheme),
+                              const SizedBox(height: 32),
                             ],
-                          ),
-                          const SizedBox(height: 16),
-                          _buildFaqItem(context, 'SNAKE BITE PROTOCOL', Icons.bug_report, colors, textTheme),
-                          const SizedBox(height: 8),
-                          _buildFaqItem(context, 'SEVERE WOUND CARE', Icons.healing, colors, textTheme),
-                          const SizedBox(height: 8),
-                          _buildFaqItem(context, 'BURN MANAGEMENT', Icons.fire_hydrant_alt, colors, textTheme),
-                          const SizedBox(height: 32),
-                        ],
+                            const Divider(height: 1),
+                            const SizedBox(height: 32),
+                          ],
+                        ),
                       );
                     }
                     
                     final historyIndex = index - 1;
                     if (historyIndex < history.length) {
                       final msg = history[historyIndex];
-                      return _buildChatMessage(msg, colors, textTheme);
+                      return FadeInAnimation(
+                        offset: const Offset(10, 0),
+                        child: _buildChatMessage(msg, colors, textTheme),
+                      );
                     }
                     
                     if (state is AiLoading && historyIndex == history.length) {
-                      return _buildTerminalPlaceholder('DECRYPTING RESPONSE...', colors, textTheme);
+                      return FadeInAnimation(
+                        child: _buildLoadingTerminal(colors, textTheme),
+                      );
                     }
 
                     return const SizedBox.shrink();
@@ -129,50 +154,214 @@ class _PanicAIHelpScreenState extends State<PanicAIHelpScreen> {
     );
   }
 
+  Widget _buildSectorSummarySection(List<SectorSummary> summaries, NullSignalColors colors, TextTheme textTheme) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Text(
+              'SECTOR SUMMARIES',
+              style: textTheme.labelSmall?.copyWith(
+                fontSize: 9,
+                color: colors.primary,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 2.0,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: colors.primary.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                'LIVE',
+                style: textTheme.labelSmall?.copyWith(fontSize: 7, color: colors.primary, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height: 140,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: summaries.length,
+            itemBuilder: (context, index) {
+              final summary = summaries[index];
+              return Container(
+                width: 280,
+                margin: const EdgeInsets.only(right: 16),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: colors.primary.withValues(alpha: 0.1)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          summary.sectorId,
+                          style: textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold, color: colors.primary),
+                        ),
+                        Text(
+                          '${summary.survivorCount} SURVIVORS',
+                          style: textTheme.labelSmall?.copyWith(fontSize: 8, color: colors.onSurface.withValues(alpha: 0.5)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Expanded(
+                      child: Text(
+                        summary.summary,
+                        style: textTheme.bodySmall?.copyWith(fontSize: 11, height: 1.4),
+                        maxLines: 3,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 4,
+                      children: summary.urgentNeeds.take(3).map((need) => Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: colors.error.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          need.toUpperCase(),
+                          style: textTheme.labelSmall?.copyWith(fontSize: 7, color: colors.error, fontWeight: FontWeight.bold),
+                        ),
+                      )).toList(),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildProtocolGrid(BuildContext context, NullSignalColors colors, TextTheme textTheme) {
+    return GridView.count(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      crossAxisCount: 2,
+      crossAxisSpacing: 12,
+      mainAxisSpacing: 12,
+      childAspectRatio: 2.5,
+      children: [
+        _buildProtocolItem(context, 'SNAKE BITE', Icons.bug_report, colors, textTheme),
+        _buildProtocolItem(context, 'WOUND CARE', Icons.healing, colors, textTheme),
+        _buildProtocolItem(context, 'BURN MGMT', Icons.fire_hydrant_alt, colors, textTheme),
+        _buildProtocolItem(context, 'CPR STEPS', Icons.favorite, colors, textTheme),
+      ],
+    );
+  }
+
+  Widget _buildProtocolItem(BuildContext context, String title, IconData icon, NullSignalColors colors, TextTheme textTheme) {
+    return GestureDetector(
+      onTap: () {
+        context.read<AiCubit>().getGuidance(title);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12),
+        decoration: BoxDecoration(
+          color: colors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.1)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 16, color: colors.primary.withValues(alpha: 0.6)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                title,
+                style: textTheme.labelSmall?.copyWith(fontSize: 9, color: colors.onSurface, fontWeight: FontWeight.w900),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildChatMessage(ChatMessage msg, NullSignalColors colors, TextTheme textTheme) {
     final isAI = msg.isAI;
     return Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: isAI ? colors.surfaceContainerLowest : colors.primary.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isAI ? colors.primary.withOpacity(0.1) : colors.outlineVariant.withOpacity(0.1)),
-      ),
-      child: Column(
+      margin: const EdgeInsets.only(bottom: 24),
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Icon(
-                isAI ? Icons.terminal : Icons.person_outline,
-                size: 14,
-                color: isAI ? colors.primary : colors.onSurface.withOpacity(0.5),
-              ),
-              const SizedBox(width: 8),
-              Text(
-                isAI ? 'NANO_AI' : 'USER_AUTH',
-                style: textTheme.labelSmall?.copyWith(
-                  fontSize: 9,
-                  fontWeight: FontWeight.w900,
-                  color: isAI ? colors.primary : colors.onSurface.withOpacity(0.5),
-                ),
-              ),
-              const Spacer(),
-              Text(
-                '${DateTime.fromMillisecondsSinceEpoch(msg.timestamp).hour}:${DateTime.fromMillisecondsSinceEpoch(msg.timestamp).minute}',
-                style: textTheme.labelSmall?.copyWith(fontSize: 8, color: colors.onSurface.withOpacity(0.3)),
-              ),
-            ],
+          Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: isAI ? colors.primary.withValues(alpha: 0.1) : colors.onSurface.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              isAI ? Icons.psychology : Icons.person,
+              size: 16,
+              color: isAI ? colors.primary : colors.onSurface.withValues(alpha: 0.4),
+            ),
           ),
-          const SizedBox(height: 12),
-          Text(
-            msg.content,
-            style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 13,
-              height: 1.5,
-              color: colors.onSurface.withOpacity(0.9),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Text(
+                      isAI ? 'AI ASSISTANT' : 'YOU',
+                      style: textTheme.labelSmall?.copyWith(
+                        fontSize: 8,
+                        fontWeight: FontWeight.w900,
+                        color: isAI ? colors.primary : colors.onSurface.withValues(alpha: 0.4),
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      '• ${DateTime.fromMillisecondsSinceEpoch(msg.timestamp).hour}:${DateTime.fromMillisecondsSinceEpoch(msg.timestamp).minute.toString().padLeft(2, '0')}',
+                      style: textTheme.labelSmall?.copyWith(fontSize: 8, color: colors.onSurface.withValues(alpha: 0.2)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: isAI ? colors.surfaceContainerLowest : Colors.transparent,
+                    borderRadius: const BorderRadius.only(
+                      topRight: Radius.circular(16),
+                      bottomLeft: Radius.circular(16),
+                      bottomRight: Radius.circular(16),
+                    ),
+                    border: isAI ? Border.all(color: colors.primary.withValues(alpha: 0.05)) : null,
+                  ),
+                  child: Text(
+                    msg.content,
+                    style: TextStyle(
+                      fontFamily: 'monospace',
+                      fontSize: 13,
+                      height: 1.6,
+                      color: colors.onSurface.withValues(alpha: 0.8),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -180,129 +369,111 @@ class _PanicAIHelpScreenState extends State<PanicAIHelpScreen> {
     );
   }
 
-  Widget _animateIn({required Widget child, required int delay}) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: Duration(milliseconds: 600 + (delay * 100)),
-      curve: Curves.easeOutQuart,
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, 20 * (1 - value)),
-            child: child,
-          ),
-        );
-      },
-      child: child,
-    );
-  }
-
-  Widget _buildFaqItem(BuildContext context, String title, IconData icon, NullSignalColors colors, TextTheme textTheme) {
-    return GestureDetector(
-      onTap: () {
-        context.read<AiCubit>().getGuidance(title);
-      },
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: colors.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: colors.outlineVariant.withOpacity(0.1)),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 18, color: colors.primary.withOpacity(0.6)),
-            const SizedBox(width: 16),
-            Text(
-              title,
-              style: textTheme.labelSmall?.copyWith(fontSize: 11, color: colors.onSurface, fontWeight: FontWeight.w900),
-            ),
-            const Spacer(),
-            Icon(Icons.arrow_forward_ios, size: 12, color: colors.onSurface.withOpacity(0.2)),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildTerminalQuery(BuildContext context, NullSignalColors colors, TextTheme textTheme) {
     return Container(
-      padding: const EdgeInsets.all(1),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
       decoration: BoxDecoration(
-        color: colors.primary.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
+        color: colors.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: colors.onSurface.withValues(alpha: 0.03),
+            blurRadius: 20,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        decoration: BoxDecoration(
-          color: colors.surfaceContainerLowest,
-          borderRadius: BorderRadius.circular(11),
-          border: Border.all(color: colors.primary.withOpacity(0.2)),
-        ),
-        child: Row(
-          children: [
-            Text(
-              'TERM >',
-              style: textTheme.labelSmall?.copyWith(
-                fontSize: 10,
-                color: colors.primary,
-                fontWeight: FontWeight.w900,
+      child: Row(
+        children: [
+          Text(
+            '//',
+            style: TextStyle(
+              fontSize: 14,
+              color: colors.primary,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: TextField(
+              controller: _queryController,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+              decoration: InputDecoration(
+                hintText: 'INPUT SECURE QUERY...',
+                hintStyle: TextStyle(
+                  color: colors.onSurface.withValues(alpha: 0.2),
+                  fontSize: 12,
+                  letterSpacing: 1.5,
+                ),
+                border: InputBorder.none,
+                isDense: true,
+              ),
+              textInputAction: TextInputAction.go,
+              onSubmitted: (value) {
+                if (value.isNotEmpty) {
+                  context.read<AiCubit>().sendMessage(value);
+                  _queryController.clear();
+                }
+              },
+            ),
+          ),
+          PulseContainer(
+            color: colors.primary,
+            child: GestureDetector(
+              onTap: () {
+                if (_queryController.text.isNotEmpty) {
+                  context.read<AiCubit>().sendMessage(_queryController.text);
+                  _queryController.clear();
+                }
+              },
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: colors.primary,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.arrow_upward, color: Colors.white, size: 18),
               ),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: TextField(
-                controller: _queryController,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 13,
-                  fontWeight: FontWeight.bold,
-                ),
-                decoration: InputDecoration(
-                  hintText: 'ASK NANO...',
-                  hintStyle: TextStyle(
-                    color: colors.onSurface.withOpacity(0.2),
-                    letterSpacing: 1.5,
-                  ),
-                  border: InputBorder.none,
-                  isDense: true,
-                ),
-                textInputAction: TextInputAction.go,
-                onSubmitted: (value) {
-                  if (value.isNotEmpty) {
-                    context.read<AiCubit>().sendMessage(value);
-                    _queryController.clear();
-                  }
-                },
-              ),
-            ),
-            Icon(Icons.send, color: colors.primary, size: 18),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildTerminalPlaceholder(String text, NullSignalColors colors, TextTheme textTheme) {
+  Widget _buildLoadingTerminal(NullSignalColors colors, TextTheme textTheme) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(32),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
-        color: colors.surfaceContainerLow.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: colors.outlineVariant.withOpacity(0.1), style: BorderStyle.solid),
+        color: colors.surfaceContainerLow.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: colors.outlineVariant.withValues(alpha: 0.05)),
       ),
-      child: Center(
-        child: Text(
-          text,
-          style: const TextStyle(
-            fontFamily: 'monospace',
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: Colors.grey,
+      child: Column(
+        children: [
+          const SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(strokeWidth: 2),
           ),
-        ),
+          const SizedBox(height: 16),
+          Text(
+            'DECRYPTING AI PAYLOAD...',
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: colors.onSurface.withValues(alpha: 0.3),
+              letterSpacing: 2.0,
+            ),
+          ),
+        ],
       ),
     );
   }

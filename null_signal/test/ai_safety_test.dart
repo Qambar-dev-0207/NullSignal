@@ -2,13 +2,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:null_signal/core/services/security_service.dart';
 import 'package:null_signal/features/sos/domain/repositories/safety_monitor.dart';
+import 'package:mocktail/mocktail.dart';
+import 'package:isar/isar.dart';
+
+class MockIsar extends Mock implements Isar {}
 
 void main() {
   group('SecurityService Tests', () {
     late SecurityService securityService;
+    late MockIsar mockIsar;
 
     setUp(() {
-      securityService = SecurityService();
+      mockIsar = MockIsar();
+      securityService = SecurityService(mockIsar);
     });
 
     test('Encryption and Decryption cycle should return original payload', () async {

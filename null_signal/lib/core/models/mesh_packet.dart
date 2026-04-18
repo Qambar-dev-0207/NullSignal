@@ -14,6 +14,21 @@ enum PacketPriority {
   critical, // SOS
 }
 
+enum PacketType {
+  @JsonValue('TEXT')
+  text,
+  @JsonValue('SOS')
+  sos,
+  @JsonValue('HAZARD_MAP')
+  hazardMap,
+  @JsonValue('CROWD_ALERT')
+  crowdAlert,
+  @JsonValue('SEISMIC_EVENT')
+  seismicEvent,
+  @JsonValue('RESOURCE_EXCHANGE')
+  resourceExchange,
+}
+
 @collection
 @JsonSerializable()
 class MeshPacket {
@@ -26,7 +41,10 @@ class MeshPacket {
   final String senderPublicKey;
   final String? receiverId; // Null for broadcast
   
-  final String payload; // Encrypted AES-256
+  @enumerated
+  final PacketType packetType;
+  
+  final String payload; // Encrypted AES-256 or GeoJSON/Telemetry
   final String signature; // ECDSA signature
   
   final int timestamp;
@@ -45,6 +63,7 @@ class MeshPacket {
     required this.senderId,
     required this.senderPublicKey,
     this.receiverId,
+    this.packetType = PacketType.text,
     required this.payload,
     required this.signature,
     required this.timestamp,

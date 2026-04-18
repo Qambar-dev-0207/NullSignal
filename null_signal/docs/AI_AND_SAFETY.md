@@ -6,7 +6,7 @@ This document outlines the intelligence and security layers of NullSignal, which
 NullSignal provides offline AI assistance across both major mobile platforms through a unified `AIService` interface.
 
 ### Platform-Specific Engines
-- **Android:** Utilizes **Gemini Nano** via the **Android AICore API**. This provides deep system integration and high performance on supported devices.
+- **Android:** Utilizes **Gemini Nano** via the **ML Kit GenAI Prompt API** (powered by **Android AICore**). This provides high-performance local inference on supported Pixel and Samsung flagship devices.
 - **iOS:** Utilizes **Gemma-2B** via the **MediaPipe LLM Inference API**. This leverages the iPhone's GPU/NPU for equivalent offline reasoning.
 
 ### Capabilities

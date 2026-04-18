@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:isar/isar.dart';
 import 'package:null_signal/core/models/mesh_packet.dart';
 import 'package:null_signal/core/services/feedback_service.dart';
 import 'package:null_signal/core/services/mesh_service.dart';
 import 'package:null_signal/core/services/security_service.dart';
 import 'package:null_signal/features/ai/domain/repositories/ai_service.dart';
+import 'package:null_signal/features/ai/domain/repositories/mesh_insight_service.dart';
 import 'package:null_signal/features/ai/presentation/bloc/ai_cubit.dart';
 import 'package:null_signal/features/mesh/presentation/bloc/mesh_cubit.dart';
+import 'package:null_signal/core/theme/app_theme.dart';
 import 'package:null_signal/features/sos/domain/repositories/safety_monitor.dart';
 import 'package:null_signal/features/sos/presentation/bloc/sos_cubit.dart';
 import 'package:null_signal/features/sos/presentation/bloc/ui_orchestrator_cubit.dart';
@@ -23,7 +26,14 @@ class PanicHomePage extends StatelessWidget {
     return MultiBlocProvider(
       providers: [
         BlocProvider(
-          create: (context) => MeshCubit(context.read<MeshService>())..startScanning(),
+          create: (context) {
+            final meshService = context.read<MeshService>();
+            return MeshCubit(
+              meshService,
+              context.read<SecurityService>(),
+              meshService.deviceId,
+            )..startScanning();
+          },
         ),
         BlocProvider(
           create: (context) {
@@ -36,7 +46,11 @@ class PanicHomePage extends StatelessWidget {
           },
         ),
         BlocProvider(
-          create: (context) => AiCubit(context.read<AIService>())..initialize(),
+          create: (context) => AiCubit(
+            context.read<AIService>(),
+            context.read<MeshInsightService>(),
+            context.read<Isar>(),
+          )..initialize(),
         ),
       ],
       child: const PanicHomeView(),
@@ -96,13 +110,17 @@ class _PanicHomeViewState extends State<PanicHomeView> {
   }
 
   void _showReceivedSos(BuildContext context, MeshPacket packet) {
+    final colors = Theme.of(context).extension<NullSignalColors>()!;
     FeedbackService.triggerSosHaptics();
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: Colors.red[900],
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Colors.white, width: 2)),
+        backgroundColor: colors.primary,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16), 
+          side: const BorderSide(color: Colors.white, width: 2),
+        ),
         title: const Row(
           children: [
             Icon(Icons.warning, color: Colors.white, size: 32),
@@ -114,12 +132,21 @@ class _PanicHomeViewState extends State<PanicHomeView> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('A nearby user requires immediate assistance!', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+            const Text(
+              'A nearby user requires immediate assistance!', 
+              style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+            ),
             const SizedBox(height: 16),
             Text('Sender ID: ${packet.senderId}', style: const TextStyle(color: Colors.white70)),
-            Text('Location: ${packet.latitude.toStringAsFixed(4)}, ${packet.longitude.toStringAsFixed(4)}', style: const TextStyle(color: Colors.white70)),
+            Text(
+              'Location: ${packet.latitude.toStringAsFixed(4)}, ${packet.longitude.toStringAsFixed(4)}', 
+              style: const TextStyle(color: Colors.white70),
+            ),
             const SizedBox(height: 12),
-            Text('Message: ${packet.payload}', style: const TextStyle(color: Colors.white, fontStyle: FontStyle.italic)),
+            Text(
+              'Message: ${packet.payload}', 
+              style: const TextStyle(color: Colors.white, fontStyle: FontStyle.italic),
+            ),
           ],
         ),
         actions: [
@@ -128,7 +155,10 @@ class _PanicHomeViewState extends State<PanicHomeView> {
             child: const Text('DISMISS', style: TextStyle(color: Colors.white70)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.red[900]),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white, 
+              foregroundColor: colors.primary,
+            ),
             onPressed: () {
               Navigator.pop(dialogContext);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -144,24 +174,30 @@ class _PanicHomeViewState extends State<PanicHomeView> {
 
   @override
   Widget build(BuildContext context) {
+    final colors = Theme.of(context).extension<NullSignalColors>()!;
+    
     return Scaffold(
+      backgroundColor: colors.background,
       body: SafeArea(
         child: _screens[_currentIndex],
       ),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
+        backgroundColor: colors.surfaceContainerLowest,
+        selectedItemColor: colors.primary,
+        unselectedItemColor: colors.onSurface.withValues(alpha: 0.3),
         onTap: (index) => setState(() => _currentIndex = index),
         items: const [
           BottomNavigationBarItem(
-            icon: Icon(Icons.medical_services, size: 40),
+            icon: Icon(Icons.medical_services, size: 28),
             label: 'AI HELP',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.sos, size: 56),
+            icon: Icon(Icons.sos, size: 40),
             label: 'SOS',
           ),
           BottomNavigationBarItem(
-            icon: Icon(Icons.hub, size: 40),
+            icon: Icon(Icons.hub, size: 28),
             label: 'NEARBY',
           ),
         ],
@@ -171,23 +207,30 @@ class _PanicHomeViewState extends State<PanicHomeView> {
           context.read<SafetyMonitor>().stop();
           context.read<UIOrchestratorCubit>().switchToNormal();
         },
-        backgroundColor: Colors.grey[800],
-        child: const Icon(Icons.exit_to_app, color: Colors.white),
+        backgroundColor: colors.onSurface,
+        child: Icon(Icons.exit_to_app, color: colors.background),
       ),
     );
   }
 
   void _showSafetyCheckIn(BuildContext context) {
+    final colors = Theme.of(context).extension<NullSignalColors>()!;
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: Colors.red[900],
+        backgroundColor: colors.primary,
         title: const Text('SAFETY CHECK-IN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        content: const Text('Are you safe? NullSignal detected prolonged inactivity.', style: TextStyle(color: Colors.white)),
+        content: const Text(
+          'Are you safe? NullSignal detected prolonged inactivity.', 
+          style: TextStyle(color: Colors.white),
+        ),
         actions: [
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.red[900]),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.white, 
+              foregroundColor: colors.primary,
+            ),
             onPressed: () {
               context.read<SafetyMonitor>().userConfirmedSafe();
               Navigator.pop(dialogContext);

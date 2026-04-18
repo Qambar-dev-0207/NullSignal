@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:isar/isar.dart';
 import 'package:null_signal/features/ai/data/models/chat_message.dart';
+import 'package:null_signal/features/ai/domain/entities/sector_summary.dart';
 import 'package:null_signal/features/ai/domain/repositories/ai_service.dart';
+import 'package:null_signal/features/ai/domain/repositories/mesh_insight_service.dart';
 
 abstract class AiState {}
 
@@ -14,7 +17,8 @@ class AiResponse extends AiState {
   final String title;
   final String content;
   final List<ChatMessage> history;
-  AiResponse(this.title, this.content, {this.history = const []});
+  final List<SectorSummary> sectorSummaries;
+  AiResponse(this.title, this.content, {this.history = const [], this.sectorSummaries = const []});
 }
 class AiError extends AiState {
   final String message;
@@ -24,15 +28,26 @@ class AiError extends AiState {
 
 class AiCubit extends Cubit<AiState> {
   final AIService _aiService;
+  final MeshInsightService _meshInsightService;
   final Isar _isar;
 
-  AiCubit(this._aiService, this._isar) : super(AiInitial());
+  AiCubit(this._aiService, this._meshInsightService, this._isar) : super(AiInitial());
 
   Future<void> initialize() async {
     try {
       await _aiService.initialize();
+      _meshInsightService.start();
+      
+      _meshInsightService.sectorSummariesStream.listen((summaries) {
+        if (state is AiResponse) {
+          final s = state as AiResponse;
+          emit(AiResponse(s.title, s.content, history: s.history, sectorSummaries: summaries));
+        }
+      });
+
       final history = await _isar.chatMessages.where().sortByTimestamp().findAll();
-      emit(AiResponse('SYSTEM READY', 'Nano AI online.', history: history));
+      final summaries = await _meshInsightService.getStoredSummaries();
+      emit(AiResponse('SYSTEM READY', 'Nano AI online.', history: history, sectorSummaries: summaries));
     } catch (e) {
       emit(AiError('AI Initialization Failed: $e'));
     }
@@ -85,7 +100,7 @@ class AiCubit extends Cubit<AiState> {
     emit(AiLoading(history: history));
     try {
       await _saveMessage(message, false);
-      final response = await _aiService.chat(message);
+      final response = await _aiService.chat(message, history: history);
       await _saveMessage(response, true);
       final updatedHistory = await _getHistory();
       emit(AiResponse('TERMINAL RESPONSE', response, history: updatedHistory));

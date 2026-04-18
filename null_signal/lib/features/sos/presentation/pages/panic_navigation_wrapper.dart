@@ -5,12 +5,15 @@ import 'package:null_signal/core/models/mesh_packet.dart';
 import 'package:null_signal/core/services/feedback_service.dart';
 import 'package:null_signal/core/services/mesh_service.dart';
 import 'package:null_signal/core/theme/app_theme.dart';
+import 'package:null_signal/features/ai/domain/repositories/ai_service.dart';
 import 'package:null_signal/features/ai/presentation/pages/panic_ai_help_screen.dart';
 import 'package:null_signal/features/dashboard/presentation/pages/normal_dashboard_screen.dart';
 import 'package:null_signal/features/mesh/presentation/pages/panic_nearby_screen.dart';
 import 'package:null_signal/features/sos/presentation/pages/sos_broadcast_screen.dart';
 import 'package:null_signal/features/sos/domain/repositories/safety_monitor.dart';
 import 'package:null_signal/features/sos/presentation/bloc/sos_cubit.dart';
+import 'package:null_signal/features/sos/presentation/pages/tactical_ai_provisioning_screen.dart';
+import 'package:null_signal/features/ai/data/repositories/gemini_ai_service.dart';
 
 class PanicNavigationWrapper extends StatefulWidget {
   const PanicNavigationWrapper({super.key});
@@ -21,7 +24,7 @@ class PanicNavigationWrapper extends StatefulWidget {
 
 class _PanicNavigationWrapperState extends State<PanicNavigationWrapper> {
   int _currentIndex = 1; // Default to Emergency (SOS) Screen
-  late PageController _pageController;
+  bool _isProvisioned = false;
   StreamSubscription<MeshPacket>? _incomingPacketSubscription;
   StreamSubscription<bool>? _checkInSubscription;
   StreamSubscription<void>? _autoSosSubscription;
@@ -36,7 +39,14 @@ class _PanicNavigationWrapperState extends State<PanicNavigationWrapper> {
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: _currentIndex);
+    
+    // Check if AI is already provisioned (native is ready)
+    final aiService = context.read<AIService>();
+    if (aiService is GeminiAIService) {
+      _isProvisioned = aiService.isProvisioned;
+    } else {
+      _isProvisioned = true;
+    }
     
     // Listen for incoming mesh packets
     final meshService = context.read<MeshService>();
@@ -54,6 +64,7 @@ class _PanicNavigationWrapperState extends State<PanicNavigationWrapper> {
             content: Text('MSG FROM ${packet.senderId.substring(0, 6)}: ${packet.payload}'),
             backgroundColor: colors.primaryContainer,
             behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           ),
         );
       }
@@ -77,14 +88,25 @@ class _PanicNavigationWrapperState extends State<PanicNavigationWrapper> {
   }
 
   void _showSafetyCheckInDialog(BuildContext context) {
+    final colors = Theme.of(context).extension<NullSignalColors>()!;
     showDialog(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        title: const Text("SAFETY CHECK-IN"),
-        content: const Text("Are you safe? NullSignal detected prolonged inactivity."),
+        backgroundColor: colors.background,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: colors.primary.withValues(alpha: 0.2)),
+        ),
+        title: Text("SAFETY CHECK-IN", style: TextStyle(color: colors.primary, fontWeight: FontWeight.bold)),
+        content: Text("Are you safe? NullSignal detected prolonged inactivity.", style: TextStyle(color: colors.onSurface.withValues(alpha: 0.7))),
         actions: [
           ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: colors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
             onPressed: () {
               context.read<SafetyMonitor>().userConfirmedSafe();
               Navigator.pop(dialogContext);
@@ -97,12 +119,13 @@ class _PanicNavigationWrapperState extends State<PanicNavigationWrapper> {
   }
 
   void _showReceivedSos(BuildContext context, MeshPacket packet) {
+    final colors = Theme.of(context).extension<NullSignalColors>()!;
     FeedbackService.triggerSosHaptics();
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: Colors.red[900],
+        backgroundColor: colors.primary,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16), 
           side: const BorderSide(color: Colors.white, width: 2)
@@ -132,7 +155,7 @@ class _PanicNavigationWrapperState extends State<PanicNavigationWrapper> {
             child: const Text('DISMISS', style: TextStyle(color: Colors.white70)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: Colors.red[900]),
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.white, foregroundColor: colors.primary),
             onPressed: () {
               Navigator.pop(dialogContext);
               ScaffoldMessenger.of(context).showSnackBar(
@@ -148,98 +171,109 @@ class _PanicNavigationWrapperState extends State<PanicNavigationWrapper> {
 
   @override
   void dispose() {
-    _pageController.dispose();
     _incomingPacketSubscription?.cancel();
+    _checkInSubscription?.cancel();
+    _autoSosSubscription?.cancel();
     super.dispose();
   }
 
   void _onItemTapped(int index) {
+    if (_currentIndex == index) return;
     setState(() {
       _currentIndex = index;
     });
-    _pageController.animateToPage(
-      index,
-      duration: const Duration(milliseconds: 500),
-      curve: Curves.elasticOut,
-    );
+    FeedbackService.triggerSosHaptics();
   }
 
   @override
   Widget build(BuildContext context) {
+    if (!_isProvisioned) {
+      return TacticalAiProvisioningScreen(
+        onComplete: () => setState(() => _isProvisioned = true),
+      );
+    }
+
     final colors = Theme.of(context).extension<NullSignalColors>()!;
     
     return Scaffold(
-      body: PageView(
-        controller: _pageController,
-        onPageChanged: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
+      body: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 600),
+        switchInCurve: Curves.easeOutQuart,
+        switchOutCurve: Curves.easeInQuart,
+        transitionBuilder: (Widget child, Animation<double> animation) {
+          return FadeTransition(
+            opacity: animation,
+            child: SlideTransition(
+              position: Tween<Offset>(
+                begin: const Offset(0.05, 0),
+                end: Offset.zero,
+              ).animate(animation),
+              child: child,
+            ),
+          );
         },
-        physics: const NeverScrollableScrollPhysics(),
-        children: _screens,
+        child: Container(
+          key: ValueKey<int>(_currentIndex),
+          child: _screens[_currentIndex],
+        ),
       ),
       bottomNavigationBar: Container(
+        height: 72,
         decoration: BoxDecoration(
-          border: Border(top: BorderSide(color: colors.surfaceContainerHighest, width: 1)),
-          boxShadow: [
-            BoxShadow(
-              color: colors.onSurface.withOpacity(0.05),
-              blurRadius: 20,
-              offset: const Offset(0, -4),
-            ),
+          color: colors.background.withValues(alpha: 0.9),
+          border: Border(top: BorderSide(color: colors.surfaceContainerHighest.withValues(alpha: 0.3), width: 1)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildNavItem(0, Icons.monitor_heart, 'STATUS', colors),
+            _buildNavItem(1, Icons.emergency, 'SOS', colors),
+            _buildNavItem(2, Icons.hub, 'MESH', colors),
+            _buildNavItem(3, Icons.psychology, 'AI HELP', colors),
           ],
         ),
-        child: BottomNavigationBar(
-          currentIndex: _currentIndex,
-          onTap: _onItemTapped,
-          selectedLabelStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.0),
-          unselectedLabelStyle: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.0),
-          items: [
-            BottomNavigationBarItem(
-              icon: Padding(
-                padding: const EdgeInsets.only(bottom: 4.0),
-                child: Icon(Icons.monitor_heart_outlined, size: 22),
-              ),
-              activeIcon: Padding(
-                padding: const EdgeInsets.only(bottom: 4.0),
-                child: Icon(Icons.monitor_heart, size: 24),
-              ),
-              label: 'STATUS',
+      ),
+    );
+  }
+
+  Widget _buildNavItem(int index, IconData icon, String label, NullSignalColors colors) {
+    final isSelected = _currentIndex == index;
+    return GestureDetector(
+      onTap: () => _onItemTapped(index),
+      behavior: HitTestBehavior.opaque,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 300),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? colors.primaryContainer.withValues(alpha: 0.1) : Colors.transparent,
+          borderRadius: BorderRadius.circular(4),
+          border: isSelected ? Border.all(color: colors.primaryContainer.withValues(alpha: 0.2)) : null,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              size: 20,
+              color: isSelected ? colors.primaryContainer : colors.onSurface.withValues(alpha: 0.3),
             ),
-            BottomNavigationBarItem(
-              icon: Padding(
-                padding: const EdgeInsets.only(bottom: 4.0),
-                child: Icon(Icons.emergency_outlined, size: 22),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 8,
+                fontWeight: FontWeight.w900,
+                color: isSelected ? colors.primaryContainer : colors.onSurface.withValues(alpha: 0.3),
+                letterSpacing: 1.5,
               ),
-              activeIcon: Padding(
-                padding: const EdgeInsets.only(bottom: 4.0),
-                child: Icon(Icons.emergency, size: 24),
-              ),
-              label: 'SOS',
             ),
-            BottomNavigationBarItem(
-              icon: Padding(
-                padding: const EdgeInsets.only(bottom: 4.0),
-                child: Icon(Icons.hub_outlined, size: 22),
+            if (isSelected)
+              Container(
+                margin: const EdgeInsets.only(top: 4),
+                width: 4,
+                height: 4,
+                decoration: BoxDecoration(color: colors.primaryContainer, shape: BoxShape.rectangle),
               ),
-              activeIcon: Padding(
-                padding: const EdgeInsets.only(bottom: 4.0),
-                child: Icon(Icons.hub, size: 24),
-              ),
-              label: 'MESH',
-            ),
-            BottomNavigationBarItem(
-              icon: Padding(
-                padding: const EdgeInsets.only(bottom: 4.0),
-                child: Icon(Icons.psychology_outlined, size: 22),
-              ),
-              activeIcon: Padding(
-                padding: const EdgeInsets.only(bottom: 4.0),
-                child: Icon(Icons.psychology, size: 24),
-              ),
-              label: 'AI HELP',
-            ),
           ],
         ),
       ),

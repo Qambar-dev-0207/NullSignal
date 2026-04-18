@@ -1,12 +1,57 @@
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:cryptography/cryptography.dart';
+import 'package:isar/isar.dart';
+import 'package:null_signal/core/models/identity.dart';
+import 'package:uuid/uuid.dart';
 
 class SecurityService {
+  final Isar _isar;
   final _aes = AesGcm.with256bits();
   final _signatureAlgorithm = Ed25519();
   final _keyExchangeAlgorithm = X25519();
+  
+  KeyPair? _cachedIdentity;
+  String? _cachedDeviceId;
 
-  /// Generates a new identity for the device
+  SecurityService(this._isar);
+
+  /// Provides the persistent device ID
+  String get deviceId => _cachedDeviceId ?? 'unknown_device';
+
+  /// Ensures an identity exists and returns it (loaded or new)
+  Future<KeyPair> getOrCreateIdentity() async {
+    if (_cachedIdentity != null) return _cachedIdentity!;
+
+    final existing = await _isar.identitys.where().findFirst();
+    if (existing != null) {
+      _cachedDeviceId = existing.deviceId;
+      _cachedIdentity = await _signatureAlgorithm.newKeyPairFromSeed(
+        Uint8List.fromList(existing.privateKeySeed),
+      );
+      return _cachedIdentity!;
+    }
+
+    // Create new
+    final seed = await _signatureAlgorithm.newKeyPair();
+    final privateKey = await seed.extractPrivateKeyBytes();
+    final deviceId = 'Node_${const Uuid().v4().substring(0, 8)}';
+    
+    final newIdentity = Identity(
+      deviceId: deviceId,
+      privateKeySeed: privateKey,
+    );
+
+    await _isar.writeTxn(() async {
+      await _isar.identitys.put(newIdentity);
+    });
+
+    _cachedDeviceId = deviceId;
+    _cachedIdentity = seed;
+    return seed;
+  }
+
+  /// Generates a new identity for the device (volatile)
   Future<KeyPair> generateIdentity() async {
     return await _signatureAlgorithm.newKeyPair();
   }

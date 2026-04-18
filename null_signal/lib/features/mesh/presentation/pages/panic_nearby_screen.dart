@@ -3,33 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:null_signal/core/theme/app_theme.dart';
 import 'package:null_signal/core/theme/null_signal_widgets.dart';
+import 'package:null_signal/core/utils/animations.dart';
 import 'package:null_signal/features/mesh/domain/entities/mesh_device.dart';
 import 'package:null_signal/features/mesh/presentation/bloc/mesh_cubit.dart';
 
-class PanicNearbyScreen extends StatefulWidget {
+class PanicNearbyScreen extends StatelessWidget {
   const PanicNearbyScreen({super.key});
-
-  @override
-  State<PanicNearbyScreen> createState() => _PanicNearbyScreenState();
-}
-
-class _PanicNearbyScreenState extends State<PanicNearbyScreen> with SingleTickerProviderStateMixin {
-  late AnimationController _rotationController;
-
-  @override
-  void initState() {
-    super.initState();
-    _rotationController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 20),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _rotationController.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,315 +16,293 @@ class _PanicNearbyScreenState extends State<PanicNearbyScreen> with SingleTicker
     final textTheme = Theme.of(context).textTheme;
 
     return NullSignalScaffold(
-      title: 'NullSignal',
+      title: 'Nearby Mesh',
       actions: [
-        Text(
-          'MESH ACTIVE',
-          style: textTheme.labelSmall?.copyWith(
-            color: colors.primaryContainer,
-            fontSize: 11,
-          ),
+        IconButton(
+          icon: const Icon(Icons.refresh, size: 20),
+          onPressed: () => context.read<MeshCubit>().startScanning(),
+          color: colors.primary,
         ),
-        const SizedBox(width: 16),
-        Icon(Icons.battery_charging_full, size: 20, color: colors.primary),
-        const SizedBox(width: 24),
+        const SizedBox(width: 8),
       ],
       body: BlocBuilder<MeshCubit, MeshState>(
         builder: (context, state) {
-          return SingleChildScrollView(
-            padding: const EdgeInsets.only(top: 24, bottom: 48),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 3D MESH VISUALIZATION HERO
-                _animateIn(
-                  delay: 0,
-                  child: Container(
-                    height: 280,
-                    width: double.infinity,
-                    decoration: BoxDecoration(
-                      color: colors.voidBlack.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: colors.outlineVariant.withOpacity(0.1)),
-                    ),
-                    clipBehavior: Clip.antiAlias,
-                    child: Stack(
-                      children: [
-                        Positioned.fill(
-                          child: AnimatedBuilder(
-                            animation: _rotationController,
-                            builder: (context, child) {
-                              return CustomPaint(
-                                painter: Mesh3DPainter(
-                                  colors: colors,
-                                  connectedCount: state.connectedNodeCount,
-                                  scannedCount: state.scannedDevices.length,
-                                  rotation: _rotationController.value * 2 * math.pi,
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                        Positioned(
-                          top: 16,
-                          left: 16,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text('TOPOGRAPHY', style: textTheme.labelSmall?.copyWith(fontSize: 8, color: colors.onSurface.withOpacity(0.4))),
-                              Text('LIVE MESH CLOUD', style: textTheme.labelSmall?.copyWith(fontSize: 14, fontStyle: FontStyle.italic, color: colors.primaryContainer)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
+          final allDevices = [...state.connectedDevices, ...state.scannedDevices];
+          
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const SizedBox(height: 24),
+              _buildMeshRadar(state, colors, textTheme),
+              const SizedBox(height: 40),
+              Text(
+                'DISCOVERED NODES (${allDevices.length})',
+                style: textTheme.labelSmall?.copyWith(
+                  color: colors.onSurface.withValues(alpha: 0.4),
+                  letterSpacing: 2.0,
                 ),
-                const SizedBox(height: 32),
-
-                // PEERS SECTION
-                _animateIn(
-                  delay: 1,
-                  child: Text(
-                    'ACTIVE PEERS (${state.connectedDevices.length})',
-                    style: textTheme.labelSmall?.copyWith(color: colors.onSurface.withOpacity(0.4)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                ...List.generate(state.connectedDevices.length, (index) {
-                  return _animateIn(
-                    delay: 2 + index,
-                    child: _buildDeviceCard(state.connectedDevices[index], colors, textTheme, isConnected: true),
-                  );
-                }),
-                
-                const SizedBox(height: 32),
-
-                // SCANNED DEVICES SECTION
-                _animateIn(
-                  delay: 3 + state.connectedDevices.length,
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'SCANNED VOID (${state.scannedDevices.length})',
-                        style: textTheme.labelSmall?.copyWith(color: colors.onSurface.withOpacity(0.4)),
+              ),
+              const SizedBox(height: 16),
+              Expanded(
+                child: allDevices.isEmpty
+                    ? _buildEmptyState(colors, textTheme)
+                    : ListView.builder(
+                        physics: const BouncingScrollPhysics(),
+                        itemCount: allDevices.length,
+                        itemBuilder: (context, index) {
+                          final device = allDevices[index];
+                          return FadeInAnimation(
+                            delay: Duration(milliseconds: index * 50),
+                            child: _buildDeviceCard(context, device, colors, textTheme),
+                          );
+                        },
                       ),
-                      if (state.isScanning)
-                        const SizedBox(
-                          width: 12,
-                          height: 12,
-                          child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(Colors.grey)),
-                        ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 12),
-                if (state.scannedDevices.isEmpty)
-                  _animateIn(
-                    delay: 4 + state.connectedDevices.length,
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 24),
-                      child: Center(
-                        child: Text('NO UNVERIFIED NODES FOUND', style: textTheme.labelSmall?.copyWith(fontSize: 9, color: colors.onSurface.withOpacity(0.2))),
-                      ),
-                    ),
-                  )
-                else
-                  ...List.generate(state.scannedDevices.length, (index) {
-                    return _animateIn(
-                      delay: 4 + state.connectedDevices.length + index,
-                      child: _buildDeviceCard(state.scannedDevices[index], colors, textTheme, isConnected: false),
-                    );
-                  }),
-
-                const SizedBox(height: 32),
-                
-                // THROUGHPUT BENTO (Minimal Refined)
-                _animateIn(
-                  delay: 5 + state.connectedDevices.length + state.scannedDevices.length,
-                  child: _buildTechnicalSummary(colors, textTheme),
-                ),
-              ],
-            ),
+              ),
+            ],
           );
         },
       ),
     );
   }
 
-  Widget _animateIn({required Widget child, required int delay}) {
-    return TweenAnimationBuilder<double>(
-      tween: Tween(begin: 0.0, end: 1.0),
-      duration: Duration(milliseconds: 600 + (delay * 50)),
-      curve: Curves.easeOutQuart,
-      builder: (context, value, child) {
-        return Opacity(
-          opacity: value,
-          child: Transform.translate(
-            offset: Offset(0, 10 * (1 - value)),
-            child: child,
-          ),
-        );
-      },
-      child: child,
-    );
-  }
-
-  Widget _buildDeviceCard(MeshDevice device, NullSignalColors colors, TextTheme textTheme, {required bool isConnected}) {
-    final int signalPercent = device.rssi != null ? ((device.rssi! + 100) * 1.4).clamp(0, 100).toInt() : 0;
-
+  Widget _buildMeshRadar(MeshState state, NullSignalColors colors, TextTheme textTheme) {
+    final allDevices = [...state.connectedDevices, ...state.scannedDevices];
+    
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(16),
+      height: 300,
+      width: double.infinity,
       decoration: BoxDecoration(
-        color: isConnected ? colors.surfaceContainerLowest : colors.surfaceContainerLow.withOpacity(0.5),
+        color: colors.background,
         borderRadius: BorderRadius.circular(12),
-        border: !isConnected ? Border.all(color: colors.outlineVariant.withOpacity(0.1)) : null,
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 32,
-            height: 32,
-            decoration: BoxDecoration(
-              color: isConnected ? colors.primaryContainer.withOpacity(0.1) : colors.onSurface.withOpacity(0.05),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(
-              isConnected ? Icons.hub : Icons.sensors,
-              size: 16,
-              color: isConnected ? colors.primaryContainer : colors.onSurface.withOpacity(0.3),
-            ),
+        border: Border.all(color: colors.primary.withValues(alpha: 0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: colors.primary.withValues(alpha: 0.05),
+            blurRadius: 30,
+            spreadRadius: -10,
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(12),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Mesh3DVisualizer(
+              devices: allDevices,
+              primaryColor: colors.primary,
+              isScanning: state.isScanning,
+            ),
+            
+            Column(
+              mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Text(device.deviceId, style: textTheme.labelSmall?.copyWith(fontSize: 12, color: colors.onSurface)),
-                Text(
-                  isConnected ? 'CONNECTED / SECURE' : 'UNVERIFIED NODE',
-                  style: textTheme.labelSmall?.copyWith(
-                    fontSize: 8, 
-                    color: isConnected ? colors.primaryContainer : colors.onSurface.withOpacity(0.4)
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: colors.primary.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: colors.primary.withValues(alpha: 0.2)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (state.isScanning)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 8.0),
+                          child: SizedBox(
+                            width: 10,
+                            height: 10,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2, 
+                              valueColor: AlwaysStoppedAnimation(Color(0xFFB71C1C)),
+                            ),
+                          ),
+                        ),
+                      Text(
+                        state.isScanning ? 'MAPPING_MESH_TOPOLOGY...' : 'MESH_STABLE',
+                        style: textTheme.labelSmall?.copyWith(
+                          color: colors.primary,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                if (device.isGateway) ...[
-                  const SizedBox(height: 4),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: colors.primaryContainer.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(color: colors.primaryContainer.withOpacity(0.3)),
-                    ),
-                    child: Text(
-                      'GATEWAY NODE',
-                      style: textTheme.labelSmall?.copyWith(
-                        fontSize: 7,
-                        fontWeight: FontWeight.w900,
-                        color: colors.primaryContainer,
-                      ),
-                    ),
-                  ),
-                ],
+                const SizedBox(height: 16),
               ],
             ),
-          ),
-          if (isConnected) ...[
-            _buildMetricMini('SIG', '$signalPercent%', colors),
-            const SizedBox(width: 16),
-            _buildMetricMini('LAT', '0.4ms', colors),
-            const SizedBox(width: 16),
-            IconButton(
-              icon: Icon(Icons.send, size: 16, color: colors.primaryContainer),
-              onPressed: () => _showSendMessageDialog(context, device),
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
-            ),
-          ] else
-            TextButton(
-              onPressed: () {
-                context.read<MeshCubit>().connectToDevice(device);
-              },
-              style: TextButton.styleFrom(
-                backgroundColor: colors.primaryContainer,
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                minimumSize: Size.zero,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-              ),
-              child: const Text('CONNECT', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildMetricMini(String label, String value, NullSignalColors colors) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.end,
-      children: [
-        Text(label, style: TextStyle(fontSize: 7, color: colors.onSurface.withOpacity(0.4), fontWeight: FontWeight.bold)),
-        Text(value, style: TextStyle(fontSize: 10, color: colors.primaryContainer, fontWeight: FontWeight.w900)),
-      ],
-    );
-  }
+  Widget _buildDeviceCard(BuildContext context, MeshDevice device, NullSignalColors colors, TextTheme textTheme) {
+    final isConnected = device.status == MeshDeviceStatus.connected;
+    final isConnecting = device.status == MeshDeviceStatus.connecting;
 
-  Widget _buildTechnicalSummary(NullSignalColors colors, TextTheme textTheme) {
     return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(color: colors.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          _buildSummaryItem('UPTIME', '99.8%', colors),
-          _buildSummaryItem('PROTOCOL', 'P2P v2.1', colors),
-          _buildSummaryItem('THROUGHPUT', '12.4 Mbps', colors),
-        ],
+      margin: const EdgeInsets.only(bottom: 12),
+      decoration: BoxDecoration(
+        color: isConnected ? colors.primary.withValues(alpha: 0.03) : colors.surfaceContainerHighest.withValues(alpha: 0.3),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isConnected ? colors.primary.withValues(alpha: 0.3) : colors.outlineVariant.withValues(alpha: 0.1),
+        ),
+      ),
+      child: IntrinsicHeight(
+        child: Row(
+          children: [
+            Container(
+              width: 4,
+              decoration: BoxDecoration(
+                color: isConnected ? colors.primary : Colors.transparent,
+                borderRadius: const BorderRadius.only(topLeft: Radius.circular(8), bottomLeft: Radius.circular(8)),
+              ),
+            ),
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 40,
+                      height: 40,
+                      decoration: BoxDecoration(
+                        border: Border.all(color: isConnected ? colors.primary : colors.onSurface.withValues(alpha: 0.1)),
+                      ),
+                      child: Icon(
+                        device.isGateway ? Icons.settings_input_antenna : Icons.memory,
+                        color: isConnected ? colors.primary : colors.onSurface.withValues(alpha: 0.3),
+                        size: 20,
+                      ),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                device.deviceName.toUpperCase(),
+                                style: textTheme.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w900,
+                                  color: isConnected ? colors.primary : colors.onSurface,
+                                  letterSpacing: 1.0,
+                                ),
+                              ),
+                              if (device.isGateway) ...[
+                                const SizedBox(width: 8),
+                                Icon(Icons.bolt, size: 12, color: colors.primary),
+                              ],
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'NODE_ID: ${device.deviceId.length > 12 ? device.deviceId.substring(0, 12).toUpperCase() : device.deviceId.toUpperCase()}',
+                            style: textTheme.labelSmall?.copyWith(
+                              fontSize: 7, 
+                              color: colors.onSurface.withValues(alpha: 0.4),
+                              fontFamily: 'monospace',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (isConnected) ...[
+                      IconButton(
+                        icon: Icon(Icons.chat_bubble_outline, color: colors.primary, size: 18),
+                        onPressed: () => _showMessagingDialog(context, device),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(border: Border.all(color: colors.primary)),
+                        child: Text('LIVE', style: textTheme.labelSmall?.copyWith(fontSize: 7, fontWeight: FontWeight.bold)),
+                      ),
+                    ] else if (isConnecting)
+                      const BaryonLoader(size: 16)
+                    else
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          side: BorderSide(color: colors.primary.withValues(alpha: 0.5)),
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
+                        ),
+                        onPressed: () => context.read<MeshCubit>().connectToDevice(device),
+                        child: Text('CONNECT', style: textTheme.labelSmall?.copyWith(fontSize: 8)),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildSummaryItem(String label, String value, NullSignalColors colors) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: TextStyle(fontSize: 8, color: colors.onSurface.withOpacity(0.4), letterSpacing: 1.0)),
-        Text(value, style: TextStyle(fontSize: 11, color: colors.onSurface, fontWeight: FontWeight.w900)),
-      ],
-    );
-  }
-
-  void _showSendMessageDialog(BuildContext context, MeshDevice device) {
+  void _showMessagingDialog(BuildContext context, MeshDevice device) {
     final controller = TextEditingController();
+    final colors = Theme.of(context).extension<NullSignalColors>()!;
+
     showDialog(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: Text('MESSAGE TO ${device.deviceId}', style: const TextStyle(color: Colors.white, fontSize: 14)),
+      builder: (context) => AlertDialog(
+        backgroundColor: colors.background,
+        shape: RoundedRectangleBorder(side: BorderSide(color: colors.primary.withValues(alpha: 0.2))),
+        title: Text('MESSAGE: ${device.deviceName.toUpperCase()}', style: TextStyle(color: colors.primary, fontSize: 14, fontWeight: FontWeight.bold)),
         content: TextField(
           controller: controller,
-          style: const TextStyle(color: Colors.white),
-          decoration: const InputDecoration(
-            hintText: 'Enter secure message...',
-            hintStyle: TextStyle(color: Colors.white30),
+          style: TextStyle(color: colors.onSurface, fontSize: 13),
+          decoration: InputDecoration(
+            hintText: 'Enter encrypted packet data...',
+            hintStyle: TextStyle(color: colors.onSurface.withValues(alpha: 0.3)),
+            enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: colors.primary.withValues(alpha: 0.1))),
           ),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('CANCEL'),
+            onPressed: () => Navigator.pop(context),
+            child: Text('CANCEL', style: TextStyle(color: colors.onSurface.withValues(alpha: 0.5), fontSize: 12)),
           ),
           ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: colors.primary, foregroundColor: Colors.white),
             onPressed: () {
-              context.read<MeshCubit>().sendDirectMessage(device, controller.text);
-              Navigator.pop(dialogContext);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Message sent to mesh tunnel')),
-              );
+              if (controller.text.isNotEmpty) {
+                context.read<MeshCubit>().sendDirectMessage(device, controller.text);
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('PACKET TRANSMITTED')),
+                );
+              }
             },
-            child: const Text('SEND'),
+            child: const Text('TRANSMIT', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyState(NullSignalColors colors, TextTheme textTheme) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.hub_outlined, size: 48, color: colors.onSurface.withValues(alpha: 0.1)),
+          const SizedBox(height: 16),
+          Text(
+            'NO NODES DETECTED',
+            style: textTheme.labelSmall?.copyWith(color: colors.onSurface.withValues(alpha: 0.2), fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Ensure Bluetooth and Location are active.',
+            style: textTheme.bodySmall?.copyWith(color: colors.onSurface.withValues(alpha: 0.15), fontSize: 10),
           ),
         ],
       ),
@@ -353,101 +310,224 @@ class _PanicNearbyScreenState extends State<PanicNearbyScreen> with SingleTicker
   }
 }
 
-class Node3D {
-  final double x, y, z;
-  final bool isConnected;
+class Mesh3DVisualizer extends StatefulWidget {
+  final List<MeshDevice> devices;
+  final Color primaryColor;
+  final bool isScanning;
 
-  Node3D(this.x, this.y, this.z, this.isConnected);
-}
-
-class Mesh3DPainter extends CustomPainter {
-  final NullSignalColors colors;
-  final int connectedCount;
-  final int scannedCount;
-  final double rotation;
-
-  Mesh3DPainter({
-    required this.colors,
-    required this.connectedCount,
-    required this.scannedCount,
-    required this.rotation,
+  const Mesh3DVisualizer({
+    super.key,
+    required this.devices,
+    required this.primaryColor,
+    required this.isScanning,
   });
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height * 0.5);
-    final radius = size.width * 0.35;
+  State<Mesh3DVisualizer> createState() => _Mesh3DVisualizerState();
+}
+
+class _Mesh3DVisualizerState extends State<Mesh3DVisualizer> with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  final List<_Node3D> _nodes = [];
+  final math.Random _random = math.Random();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 15),
+    )..repeat();
     
-    final nodes = <Node3D>[];
+    _generateInitialNodes();
+  }
 
-    // Generate Nodes in a 3D sphere volume
-    for (int i = 0; i < (connectedCount + scannedCount); i++) {
-      double phi = math.acos(-1 + (2 * i) / (connectedCount + scannedCount));
-      double theta = math.sqrt((connectedCount + scannedCount) * math.pi) * phi;
-      
-      nodes.add(Node3D(
-        math.cos(theta) * math.sin(phi),
-        math.sin(theta) * math.sin(phi),
-        math.cos(phi),
-        i < connectedCount,
-      ));
+  void _generateInitialNodes() {
+    _nodes.clear();
+    // Add "Self" node at origin
+    _nodes.add(_Node3D(
+      x: 0, y: 0, z: 0,
+      radius: 8,
+      color: widget.primaryColor,
+      isSelf: true,
+    ));
+
+    for (var device in widget.devices) {
+      _nodes.add(_createNodeForDevice(device));
     }
+  }
 
-    // Apply rotation and project to 2D
-    final projectedPoints = <Offset>[];
-    final depths = <double>[];
+  _Node3D _createNodeForDevice(MeshDevice device) {
+    final dist = 80.0 + _random.nextDouble() * 120.0;
+    final angle = _random.nextDouble() * 2 * math.pi;
+    final elevation = (_random.nextDouble() - 0.5) * math.pi;
+
+    return _Node3D(
+      x: dist * math.cos(angle) * math.cos(elevation),
+      y: dist * math.sin(elevation),
+      z: dist * math.sin(angle) * math.cos(elevation),
+      radius: device.status == MeshDeviceStatus.connected ? 6 : 4,
+      color: device.status == MeshDeviceStatus.connected ? widget.primaryColor : widget.primaryColor.withValues(alpha: 0.4),
+      device: device,
+    );
+  }
+
+  @override
+  void didUpdateWidget(Mesh3DVisualizer oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.devices.length != oldWidget.devices.length) {
+      _syncNodes();
+    }
+  }
+
+  void _syncNodes() {
+    final existingDeviceIds = _nodes.where((n) => n.device != null).map((n) => n.device!.deviceId).toSet();
     
-    for (var node in nodes) {
-      // Rotation around Y axis
-      double x = node.x * math.cos(rotation) - node.z * math.sin(rotation);
-      double z = node.x * math.sin(rotation) + node.z * math.cos(rotation);
-      double y = node.y;
-
-      // Simple perspective projection
-      double perspective = 1.5 / (2.0 + z);
-      projectedPoints.add(Offset(
-        center.dx + x * radius * perspective,
-        center.dy + y * radius * perspective,
-      ));
-      depths.add(z);
-    }
-
-    // Draw connection lines first (only between "nearby" projected points or all for mesh look)
-    final linePaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.5;
-
-    for (int i = 0; i < projectedPoints.length; i++) {
-      for (int j = i + 1; j < projectedPoints.length; j++) {
-        double dist = (nodes[i].x - nodes[j].x).abs() + (nodes[i].y - nodes[j].y).abs() + (nodes[i].z - nodes[j].z).abs();
-        if (dist < 1.2) {
-          double avgDepth = (depths[i] + depths[j]) / 2;
-          linePaint.color = colors.primaryContainer.withOpacity((0.1 * (1.0 - avgDepth)).clamp(0.0, 0.2));
-          canvas.drawLine(projectedPoints[i], projectedPoints[j], linePaint);
-        }
+    for (var device in widget.devices) {
+      if (!existingDeviceIds.contains(device.deviceId)) {
+        _nodes.add(_createNodeForDevice(device));
       }
     }
-
-    // Draw Nodes
-    final nodePaint = Paint()..style = PaintingStyle.fill;
-    for (int i = 0; i < projectedPoints.length; i++) {
-      double z = depths[i];
-      double opacity = (0.8 * (1.0 - z)).clamp(0.1, 1.0);
-      double sizeMult = (1.0 - z).clamp(0.5, 2.0);
-      
-      nodePaint.color = (nodes[i].isConnected ? colors.primaryContainer : colors.onSurface.withOpacity(0.3)).withOpacity(opacity);
-      canvas.drawCircle(projectedPoints[i], 3.0 * sizeMult, nodePaint);
-      
-      if (nodes[i].isConnected) {
-        canvas.drawCircle(
-          projectedPoints[i], 
-          6.0 * sizeMult, 
-          Paint()..color = colors.primaryContainer.withOpacity(opacity * 0.2)
-        );
+    
+    // Update colors/status
+    for (var node in _nodes) {
+      if (node.device != null) {
+        final d = widget.devices.firstWhere((dev) => dev.deviceId == node.device!.deviceId, orElse: () => node.device!);
+        node.color = d.status == MeshDeviceStatus.connected ? widget.primaryColor : widget.primaryColor.withValues(alpha: 0.4);
+        node.radius = d.status == MeshDeviceStatus.connected ? 6 : 4;
       }
     }
   }
 
   @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => true;
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return CustomPaint(
+          size: Size.infinite,
+          painter: _Mesh3DPainter(
+            nodes: _nodes,
+            rotation: _controller.value * 2 * math.pi,
+            primaryColor: widget.primaryColor,
+          ),
+        );
+      },
+    );
+  }
 }
+
+class _Node3D {
+  double x, y, z;
+  double radius;
+  Color color;
+  final MeshDevice? device;
+  final bool isSelf;
+
+  _Node3D({
+    required this.x,
+    required this.y,
+    required this.z,
+    required this.radius,
+    required this.color,
+    this.device,
+    this.isSelf = false,
+  });
+}
+
+class _Mesh3DPainter extends CustomPainter {
+  final List<_Node3D> nodes;
+  final double rotation;
+  final Color primaryColor;
+
+  _Mesh3DPainter({
+    required this.nodes,
+    required this.rotation,
+    required this.primaryColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final paint = Paint()..style = PaintingStyle.fill;
+    final linePaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.0;
+
+    // Projection constants
+    const focalLength = 350.0;
+
+    // Transform and project nodes
+    final projectedNodes = nodes.map((node) {
+      // Rotate around Y axis
+      final cosR = math.cos(rotation);
+      final sinR = math.sin(rotation);
+      
+      final rx = node.x * cosR - node.z * sinR;
+      final rz = node.x * sinR + node.z * cosR + 400; // Move back into scene
+      final ry = node.y;
+
+      // Project
+      final scale = focalLength / rz;
+      final px = rx * scale + center.dx;
+      final py = ry * scale + center.dy;
+      
+      return (px: px, py: py, rz: rz, scale: scale, node: node);
+    }).toList();
+
+    // Sort by depth (Z-buffer)
+    projectedNodes.sort((a, b) => b.rz.compareTo(a.rz));
+
+    // Draw lines first (background)
+    for (var pNode in projectedNodes) {
+      if (pNode.node.isSelf) continue;
+      
+      final isConnected = pNode.node.device?.status == MeshDeviceStatus.connected;
+      if (isConnected) {
+        linePaint.color = primaryColor.withValues(alpha: 0.5 * pNode.scale);
+        linePaint.strokeWidth = 2.0 * pNode.scale;
+        
+        // Find self projected position
+        final self = projectedNodes.firstWhere((n) => n.node.isSelf);
+        canvas.drawLine(Offset(self.px, self.py), Offset(pNode.px, pNode.py), linePaint);
+      } else {
+        // Subtle grid/network lines to center
+        linePaint.color = primaryColor.withValues(alpha: 0.1 * pNode.scale);
+        linePaint.strokeWidth = 0.5 * pNode.scale;
+        final self = projectedNodes.firstWhere((n) => n.node.isSelf);
+        canvas.drawLine(Offset(self.px, self.py), Offset(pNode.px, pNode.py), linePaint);
+      }
+    }
+
+    // Draw nodes
+    for (var pNode in projectedNodes) {
+      paint.color = pNode.node.color.withValues(alpha: 0.8 * pNode.scale + 0.2);
+      
+      // Node glow
+      final glowPaint = Paint()
+        ..color = pNode.node.color.withValues(alpha: 0.2 * pNode.scale)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+      
+      canvas.drawCircle(Offset(pNode.px, pNode.py), pNode.node.radius * pNode.scale * 2.5, glowPaint);
+      canvas.drawCircle(Offset(pNode.px, pNode.py), pNode.node.radius * pNode.scale, paint);
+
+      if (pNode.node.isSelf) {
+         paint.style = PaintingStyle.stroke;
+         paint.strokeWidth = 1.0;
+         paint.color = primaryColor.withValues(alpha: 0.6);
+         canvas.drawCircle(Offset(pNode.px, pNode.py), pNode.node.radius * pNode.scale * 1.8, paint);
+         paint.style = PaintingStyle.fill;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _Mesh3DPainter oldDelegate) => true;
+}
+

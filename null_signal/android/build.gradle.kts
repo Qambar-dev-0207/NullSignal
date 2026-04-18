@@ -16,19 +16,34 @@ subprojects {
 subprojects {
     afterEvaluate {
         if (project.hasProperty("android")) {
-            configure<com.android.build.gradle.BaseExtension> {
-                if (namespace == null) {
-                    namespace = "com.nullsignal.${project.name.replace(":", ".").replace("-", ".")}"
-                }
-                
-                compileOptions {
-                    sourceCompatibility = JavaVersion.VERSION_17
-                    targetCompatibility = JavaVersion.VERSION_17
-                }
+            val android = project.extensions.getByName("android") as com.android.build.gradle.BaseExtension
+            
+            // Force compileSdkVersion to at least 34 to ensure lStar attribute is recognized
+            android.compileSdkVersion(34)
+            
+            // Fix for namespace and compileOptions references in Kotlin DSL
+            if (android.namespace == null) {
+                android.namespace = "com.nullsignal.${project.name.replace(":", ".").replace("-", ".")}"
             }
             
+            android.compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+
+            // Force consistent androidx.core version
+            project.configurations.all {
+                resolutionStrategy.eachDependency {
+                    if (requested.group == "androidx.core" && requested.name == "core") {
+                        useVersion("1.9.0")
+                    }
+                    if (requested.group == "androidx.core" && requested.name == "core-ktx") {
+                        useVersion("1.9.0")
+                    }
+                }
+            }
+
             // Fix for AGP 8.0+ where 'package' attribute in AndroidManifest.xml is forbidden
-            val android = project.extensions.getByName("android") as com.android.build.gradle.BaseExtension
             android.sourceSets.getByName("main").manifest.srcFile("src/main/AndroidManifest.xml")
             
             project.tasks.withType<com.android.build.gradle.tasks.ProcessLibraryManifest>().configureEach {

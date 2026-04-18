@@ -53,6 +53,15 @@ class MeshCubit extends Cubit<MeshState> {
         isScanning: true,
       ));
     });
+
+    // Handle incoming direct messages
+    _meshService.incomingPackets.listen((packet) async {
+      if (packet.receiverId == _deviceId) {
+        developer.log('MeshCubit: New direct message received from ${packet.senderId}');
+        // In a real app, we would decrypt and show a notification or update a chat UI
+        // For now, we'll log it and assume the receiver logic is working.
+      }
+    });
   }
 
   void connectToDevice(MeshDevice device) async {
@@ -64,7 +73,7 @@ class MeshCubit extends Cubit<MeshState> {
       final packetId = const Uuid().v4();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       
-      final myKeyPair = await _securityService.generateIdentity();
+      final myKeyPair = await _securityService.getOrCreateIdentity();
       
       String payloadToTransmit = message;
       

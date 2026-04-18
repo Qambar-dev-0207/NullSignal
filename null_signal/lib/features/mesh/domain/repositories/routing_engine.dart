@@ -1,23 +1,41 @@
+import 'package:isar/isar.dart';
 import 'package:null_signal/core/models/mesh_packet.dart';
+import 'package:null_signal/core/models/contact.dart'; // Contains SeenPacket
 import 'package:null_signal/features/mesh/domain/entities/mesh_device.dart';
 
 class RoutingEngine {
-  final int maxCacheSize = 1000;
-  final Set<String> _seenPacketIds = <String>{};
+  final Isar _isar;
+
+  RoutingEngine(this._isar);
 
   /// Determines if a packet should be forwarded to others
-  bool shouldForward(MeshPacket packet, String currentDeviceId) {
-    // Don't forward if we've seen it before
-    if (_seenPacketIds.contains(packet.packetId)) return false;
-    
-    // Don't forward if TTL is expired
+  Future<bool> shouldForward(MeshPacket packet, String currentDeviceId) async {
+    // 1. TTL Check (Fast fail)
     if (packet.ttl <= 0) return false;
+
+    // 2. Persistent Loop Prevention (Seen-IDs Cache)
+    final existing = await _isar.seenPackets.filter().packetIdEqualTo(packet.packetId).findFirst();
+    if (existing != null) return false;
     
-    // Mark as seen
-    _addToCache(packet.packetId);
+    // 3. Destination Check
+    if (packet.receiverId == currentDeviceId) {
+      // Still mark as seen so we don't process it again if it circles back
+      await _isar.writeTxn(() async {
+        await _isar.seenPackets.put(SeenPacket(
+          packetId: packet.packetId,
+          timestamp: DateTime.now().millisecondsSinceEpoch,
+        ));
+      });
+      return false;
+    }
     
-    // Don't forward if it's meant for us (unless it's a broadcast)
-    if (packet.receiverId == currentDeviceId) return false;
+    // 4. Register as seen and return true for forwarding
+    await _isar.writeTxn(() async {
+      await _isar.seenPackets.put(SeenPacket(
+        packetId: packet.packetId,
+        timestamp: DateTime.now().millisecondsSinceEpoch,
+      ));
+    });
     
     return true;
   }
@@ -29,27 +47,18 @@ class RoutingEngine {
     final connectedCandidates = candidates.where((d) => d.isConnected).toList();
     if (connectedCandidates.isEmpty) return null;
 
-    // Prioritize Gateway nodes if it's a gateway relay packet
+    // DTN logic: Prioritize Gateway nodes if it's a gateway relay packet
     if (packet.isGatewayRelay) {
       final gateways = connectedCandidates.where((d) => d.isGateway).toList();
       if (gateways.isNotEmpty) return _selectByBattery(gateways);
     }
 
-    // Weight selection based on Battery level and RSSI
     return _selectByBattery(connectedCandidates);
   }
 
   MeshDevice _selectByBattery(List<MeshDevice> candidates) {
-    // Simple heuristic: pick device with highest battery above 20% threshold
     candidates.sort((a, b) => (b.batteryLevel ?? 0).compareTo(a.batteryLevel ?? 0));
     return candidates.first;
-  }
-
-  void _addToCache(String packetId) {
-    if (_seenPacketIds.length >= maxCacheSize) {
-      _seenPacketIds.remove(_seenPacketIds.first);
-    }
-    _seenPacketIds.add(packetId);
   }
 
   MeshPacket decrementTtl(MeshPacket packet) {
@@ -67,5 +76,13 @@ class RoutingEngine {
       longitude: packet.longitude,
       isGatewayRelay: packet.isGatewayRelay,
     );
+  }
+
+  /// Cleanup old seen IDs to keep DTN store lean (e.g. older than 24h)
+  Future<void> pruneSeenCache() async {
+    final dayAgo = DateTime.now().subtract(const Duration(hours: 24)).millisecondsSinceEpoch;
+    await _isar.writeTxn(() async {
+      await _isar.seenPackets.filter().timestampLessThan(dayAgo).deleteAll();
+    });
   }
 }
