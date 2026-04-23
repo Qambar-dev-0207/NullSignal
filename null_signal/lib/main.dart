@@ -36,87 +36,78 @@ import 'dart:developer' as developer;
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
-  // Initialize Isar
-  final dir = await getApplicationDocumentsDirectory();
-  final isar = await Isar.open(
-    [MeshPacketSchema, ChatMessageSchema, IdentitySchema, PeerSchema, ContactSchema, SeenPacketSchema, SectorSummarySchema],
-    directory: dir.path,
-  );
+  developer.log('[SYSTEM] System Booting...', name: 'System');
 
-  final deviceInfo = DeviceInfoPlugin();
-  bool isPhysicalDevice = true;
-  
   try {
-    if (Platform.isAndroid) {
-      final androidInfo = await deviceInfo.androidInfo;
-      isPhysicalDevice = androidInfo.isPhysicalDevice;
-    } else if (Platform.isIOS) {
-      final iosInfo = await deviceInfo.iosInfo;
-      isPhysicalDevice = iosInfo.isPhysicalDevice;
-    }
-  } catch (e) {
-    isPhysicalDevice = false;
-  }
+    final dir = await getApplicationDocumentsDirectory();
+    final isar = await Isar.open(
+      [MeshPacketSchema, ChatMessageSchema, IdentitySchema, PeerSchema, ContactSchema, SeenPacketSchema, SectorSummarySchema],
+      directory: dir.path,
+    );
 
-  final gatewayMonitor = GatewayMonitor()..start();
-  final securityService = SecurityService(isar);
-  final satelliteService = SatelliteGatewayServiceImpl();
-  
-  // Initialize persistent identity
-  await securityService.getOrCreateIdentity();
-  
-  final safetyMonitor = SafetyMonitor()..start();
-
-  // Use NearbyMeshServiceImpl for real devices, Simulated for emulators
-  final MeshService meshService = isPhysicalDevice 
-      ? NearbyMeshServiceImpl(gatewayMonitor, securityService, isar, satelliteService: satelliteService) 
-      : SimulatedMeshService(gatewayMonitor, securityService, isar);
-      
-  // Initialize AI Service based on platform and device type
-  AIService aiService;
-  
-  Future<AIService> getInitializedAIService() async {
-    AIService? nativeService;
-    
-    if (isPhysicalDevice) {
-      nativeService = Platform.isAndroid ? AndroidAIService() : IosAIService();
-      final supported = await nativeService.isSupported();
-      if (!supported) {
-        nativeService = null;
-        developer.log('Native AI not supported on this device hardware.');
+    final deviceInfo = DeviceInfoPlugin();
+    bool isPhysicalDevice = true;
+    try {
+      if (Platform.isAndroid) {
+        final androidInfo = await deviceInfo.androidInfo;
+        isPhysicalDevice = androidInfo.isPhysicalDevice;
+      } else if (Platform.isIOS) {
+        final iosInfo = await deviceInfo.iosInfo;
+        isPhysicalDevice = iosInfo.isPhysicalDevice;
       }
+    } catch (_) {
+      isPhysicalDevice = false;
+    }
+
+    final gatewayMonitor = GatewayMonitor()..start();
+    final securityService = SecurityService(isar);
+    final satelliteService = SatelliteGatewayServiceImpl();
+    await securityService.getOrCreateIdentity();
+    final safetyMonitor = SafetyMonitor()..start();
+
+    final MeshService meshService = isPhysicalDevice 
+        ? NearbyMeshServiceImpl(gatewayMonitor, securityService, isar, satelliteService: satelliteService) 
+        : SimulatedMeshService(gatewayMonitor, securityService, isar);
+    
+    meshService.start();
+
+    AIService? nativeService;
+    if (isPhysicalDevice) {
+      nativeService = Platform.isAndroid ? AndroidAIService(useGPU: true) : IosAIService();
     }
     
-    // SECURE: Read API key from build-time environment variable
     const String geminiApiKey = String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
+    final aiService = GeminiAIService(apiKey: geminiApiKey, nativeService: nativeService);
     
-    // Master Orchestrator: Combines Native, Cloud, and Local Heuristics
-    final masterService = GeminiAIService(apiKey: geminiApiKey, nativeService: nativeService);
-    await masterService.initialize();
-    
-    return masterService;
-  }
+    // Non-blocking initialization
+    aiService.initialize().catchError((e) => developer.log('[AI] Init Error: $e', name: 'System'));
 
-  aiService = await getInitializedAIService();
-  
-  final meshInsightService = MeshInsightServiceImpl(meshService, aiService, isar);
-  final resourceBroker = ResourceBrokerService(meshService, aiService, isar);
-  
-  // Unified Intelligence Service
-  final intelligenceService = IntelligenceServiceImpl(meshService, gatewayMonitor, aiService);
-  
-  runApp(NullSignalApp(
-    meshService: meshService, 
-    aiService: aiService,
-    meshInsightService: meshInsightService,
-    satelliteService: satelliteService,
-    resourceBroker: resourceBroker,
-    intelligenceService: intelligenceService,
-    securityService: securityService,
-    safetyMonitor: safetyMonitor,
-    isar: isar,
-  ));
+    final meshInsightService = MeshInsightServiceImpl(meshService, aiService, isar);
+    final resourceBroker = ResourceBrokerService(meshService, aiService, isar);
+    final intelligenceService = IntelligenceServiceImpl(meshService, gatewayMonitor, aiService);
+    
+    developer.log('[SYSTEM] UI Ready', name: 'System');
+    runApp(NullSignalApp(
+      meshService: meshService, 
+      aiService: aiService,
+      meshInsightService: meshInsightService,
+      satelliteService: satelliteService,
+      resourceBroker: resourceBroker,
+      intelligenceService: intelligenceService,
+      securityService: securityService,
+      safetyMonitor: safetyMonitor,
+      isar: isar,
+    ));
+    
+  } catch (e, stack) {
+    developer.log('[SYSTEM] CRITICAL BOOT FAILURE: $e', name: 'System', error: e, stackTrace: stack);
+    runApp(MaterialApp(
+      home: Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(child: Text('SYSTEM FAILURE: $e', style: const TextStyle(color: Colors.red, fontFamily: 'monospace'))),
+      ),
+    ));
+  }
 }
 
 class NullSignalApp extends StatelessWidget {
@@ -160,9 +151,11 @@ class NullSignalApp extends StatelessWidget {
       child: MultiBlocProvider(
         providers: [
           BlocProvider<MeshCubit>(
+            lazy: false,
             create: (context) => MeshCubit(meshService, securityService, meshService.deviceId)..startScanning(),
           ),
           BlocProvider<AiCubit>(
+            lazy: false,
             create: (context) => AiCubit(aiService, meshInsightService, isar)..initialize(),
           ),
           BlocProvider<SosCubit>(
@@ -175,13 +168,9 @@ class NullSignalApp extends StatelessWidget {
         child: MaterialApp(
           title: 'NullSignal',
           debugShowCheckedModeBanner: false,
-          
-          // Applying the high-precision "NullSignal Core" design system
           theme: AppTheme.normalTheme,
           darkTheme: AppTheme.normalTheme, 
           themeMode: ThemeMode.light,
-
-          // Starting with the Panic Mode orchestration wrapper
           home: const PanicNavigationWrapper(),
         ),
       ),

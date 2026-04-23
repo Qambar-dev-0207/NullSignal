@@ -14,7 +14,7 @@ class GeminiAIService implements AIService {
     if (nativeService is AndroidAIService) {
       return (nativeService as AndroidAIService).currentProgress >= 100;
     }
-    // For iOS or other services, assume provisioned if they are active
+    // For iOS, assume provisioned once initialized (AppDelegate handles download internally)
     return true;
   }
 
@@ -22,6 +22,7 @@ class GeminiAIService implements AIService {
     if (nativeService is AndroidAIService) {
       return (nativeService as AndroidAIService).downloadProgress;
     }
+    // iOS doesn't expose progress yet via MethodChannel in this implementation, return 100 for simplicity
     return Stream.value(100);
   }
 
@@ -48,6 +49,7 @@ class GeminiAIService implements AIService {
         await nativeService!.initialize();
       } catch (e) {
         developer.log('Native AI init failed: $e');
+        rethrow; // Rethrow to let the UI/Orchestrator handle the failure
       }
     }
     

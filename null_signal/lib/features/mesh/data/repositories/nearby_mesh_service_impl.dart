@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'dart:io';
 import 'dart:developer' as developer;
 import 'package:nearby_connections/nearby_connections.dart';
 import 'package:isar/isar.dart';
@@ -23,7 +22,6 @@ import 'package:uuid/uuid.dart';
 class NearbyMeshServiceImpl implements MeshService {
   final GatewayMonitor _gatewayMonitor;
   final SecurityService _securityService;
-  final SatelliteGatewayService? _satelliteService;
   final Isar _isar;
   final Strategy _strategy = Strategy.P2P_CLUSTER;
   final String _serviceId = "com.nullsignal.p2p";
@@ -33,9 +31,9 @@ class NearbyMeshServiceImpl implements MeshService {
   Timer? _pruningTimer;
   final Set<String> _connectingDeviceIds = {};
 
-  NearbyMeshServiceImpl(this._gatewayMonitor, this._securityService, this._isar, {SatelliteGatewayService? satelliteService}) 
-    : _satelliteService = satelliteService {
+  NearbyMeshServiceImpl(this._gatewayMonitor, this._securityService, this._isar, {SatelliteGatewayService? satelliteService}) {
     _routingEngine = RoutingEngine(_isar);
+    developer.log('[NULLSIGNAL] MeshService: Initialized', name: 'MeshService');
   }
 
   @override
@@ -59,41 +57,38 @@ class NearbyMeshServiceImpl implements MeshService {
   List<MeshDevice> get currentDevices => _devicesSubject.value;
 
   Future<bool> _checkPermissions() async {
+    developer.log('[NULLSIGNAL] MeshService: Requesting Mesh Permissions...', name: 'MeshService');
+    
     List<Permission> permissions = [
       Permission.location,
+      Permission.locationAlways,
       Permission.nearbyWifiDevices,
+      Permission.bluetooth,
+      Permission.bluetoothScan,
+      Permission.bluetoothAdvertise,
+      Permission.bluetoothConnect,
     ];
-
-    if (Platform.isAndroid) {
-      permissions.addAll([
-        Permission.bluetoothScan,
-        Permission.bluetoothAdvertise,
-        Permission.bluetoothConnect,
-      ]);
-    }
 
     Map<Permission, PermissionStatus> statuses = await permissions.request();
     
-    bool essentialGranted = statuses[Permission.location]?.isGranted ?? false;
-    if (Platform.isAndroid) {
-      essentialGranted = essentialGranted && 
-        (statuses[Permission.bluetoothScan]?.isGranted ?? false) &&
-        (statuses[Permission.bluetoothAdvertise]?.isGranted ?? false) &&
-        (statuses[Permission.bluetoothConnect]?.isGranted ?? false);
-    }
+    bool allGranted = true;
+    statuses.forEach((permission, status) {
+      developer.log('[NULLSIGNAL] MeshService: Permission $permission -> $status', name: 'MeshService');
+      if (permission != Permission.locationAlways && !status.isGranted) {
+        allGranted = false;
+      }
+    });
 
-    if (!essentialGranted) {
-      developer.log('MeshService: Essential permissions missing: ${statuses.entries.where((e) => !e.value.isGranted).map((e) => e.key).toList()}', name: 'MeshService');
-    }
-
-    return essentialGranted;
+    return allGranted;
   }
 
   @override
   Future<void> start() async {
-    developer.log('MeshService: Starting...', name: 'MeshService');
+    developer.log('[NULLSIGNAL] MeshService: STARTING with ID: $deviceId', name: 'MeshService');
+    
     if (!await _checkPermissions()) {
-      developer.log('MeshService: Permissions denied', name: 'MeshService');
+      developer.log('[NULLSIGNAL] MeshService: CRITICAL - Permissions denied.', name: 'MeshService');
+      return;
     }
 
     _myKeyPair = await _securityService.getOrCreateIdentity();
@@ -101,26 +96,33 @@ class NearbyMeshServiceImpl implements MeshService {
 
     // 1. Start Advertising
     try {
+      developer.log('[NULLSIGNAL] MeshService: Activating Advertising...', name: 'MeshService');
       await Nearby().startAdvertising(
         advertisingName,
         _strategy,
         onConnectionInitiated: _onConnectionInitiated,
-        onConnectionResult: _onConnectionResult,
-        onDisconnected: _onDisconnected,
+        onConnectionResult: (id, status) {
+          developer.log('[NULLSIGNAL] MeshService: Connection Result for $id: $status', name: 'MeshService');
+          _onConnectionResult(id, status);
+        },
+        onDisconnected: (id) {
+          developer.log('[NULLSIGNAL] MeshService: Device Disconnected: $id', name: 'MeshService');
+          _onDisconnected(id);
+        },
         serviceId: _serviceId,
       );
-      developer.log('MeshService: Advertising started as $advertisingName', name: 'MeshService');
     } catch (e) {
-      developer.log('MeshService: Advertising failed: $e', name: 'MeshService');
+      developer.log('[NULLSIGNAL] MeshService: Advertising ERROR: $e', name: 'MeshService');
     }
 
     // 2. Start Discovery
     try {
+      developer.log('[NULLSIGNAL] MeshService: Activating Discovery...', name: 'MeshService');
       await Nearby().startDiscovery(
         advertisingName,
         _strategy,
         onEndpointFound: (id, name, serviceId) {
-          developer.log('MeshService: Endpoint found: $id ($name)', name: 'MeshService');
+          developer.log('[NULLSIGNAL] MeshService: NODE FOUND: $id ($name)', name: 'MeshService');
           final isGateway = name.endsWith('|G');
           final cleanName = isGateway ? name.substring(0, name.length - 2) : name;
           final device = MeshDevice(
@@ -132,22 +134,22 @@ class NearbyMeshServiceImpl implements MeshService {
           _discoveredDevices[id] = device;
           _updateDevices();
           
-          // AUTO-CONNECT logic for immediate mesh formation
-          connect(device);
+          if (deviceId.compareTo(id) < 0) {
+            developer.log('[NULLSIGNAL] MeshService: Primary. Initiating to $id...', name: 'MeshService');
+            connect(device);
+          }
         },
         onEndpointLost: (id) {
-          developer.log('MeshService: Endpoint lost: $id', name: 'MeshService');
+          developer.log('[NULLSIGNAL] MeshService: NODE LOST: $id', name: 'MeshService');
           _discoveredDevices.remove(id);
           _updateDevices();
         },
         serviceId: _serviceId,
       );
-      developer.log('MeshService: Discovery started', name: 'MeshService');
     } catch (e) {
-      developer.log('MeshService: Discovery failed: $e', name: 'MeshService');
+      developer.log('[NULLSIGNAL] MeshService: Discovery ERROR: $e', name: 'MeshService');
     }
 
-    // 3. Start Heartbeat & Pruning
     _startHeartbeat();
     _startPruning();
   }
@@ -196,7 +198,7 @@ class NearbyMeshServiceImpl implements MeshService {
   }
 
   void _onConnectionInitiated(String id, ConnectionInfo info) {
-    developer.log('MeshService: Auto-accepting connection with $id', name: 'MeshService');
+    developer.log('[NULLSIGNAL] MeshService: Accepting $id ($info)', name: 'MeshService');
     Nearby().acceptConnection(
       id,
       onPayLoadRecieved: (id, payload) async {
@@ -208,24 +210,20 @@ class NearbyMeshServiceImpl implements MeshService {
             final json = jsonDecode(jsonString);
             final packet = MeshPacket.fromJson(json);
             
-            // 1. Validate Signature
             final publicKeyBytes = base64.decode(packet.senderPublicKey);
             final senderPublicKey = SimplePublicKey(publicKeyBytes, type: KeyPairType.ed25519);
             final isValid = await _securityService.verify(packet.payload, packet.signature, senderPublicKey);
             
             if (!isValid) return;
 
-            // 2. Direct for us or Broadcast
             final receiverId = packet.receiverId;
             if (receiverId == deviceId || receiverId == null) {
               if (packet.payload != 'HEARTBEAT') {
                 _incomingPacketsSubject.add(packet);
               }
-              // If it's specifically for us, we don't need to check forwarding (though mesh typically floods)
               if (receiverId == deviceId) return;
             }
 
-            // 3. Forwarding (Flood Routing with duplicate suppression)
             if (!await _routingEngine.shouldForward(packet, deviceId)) return;
 
             await _isar.writeTxn(() async {
@@ -290,10 +288,15 @@ class NearbyMeshServiceImpl implements MeshService {
     MeshDeviceStatus newStatus;
     switch (status) {
       case Status.CONNECTED:
+        developer.log('[NULLSIGNAL] MeshService: CONNECTED TO $id', name: 'MeshService');
         newStatus = MeshDeviceStatus.connected;
         break;
       case Status.REJECTED:
+        developer.log('[NULLSIGNAL] MeshService: REJECTED BY $id', name: 'MeshService');
+        newStatus = MeshDeviceStatus.disconnected;
+        break;
       case Status.ERROR:
+        developer.log('[NULLSIGNAL] MeshService: ERROR WITH $id', name: 'MeshService');
         newStatus = MeshDeviceStatus.disconnected;
         break;
     }
@@ -325,37 +328,34 @@ class NearbyMeshServiceImpl implements MeshService {
 
   @override
   Future<void> connect(MeshDevice device) async {
-    if (_connectingDeviceIds.contains(device.deviceId) || device.isConnected) return;
+    if (_connectingDeviceIds.contains(device.deviceId)) return;
+    if (_discoveredDevices[device.deviceId]?.isConnected == true) return;
     
     _connectingDeviceIds.add(device.deviceId);
-    int retries = 0;
-    const maxRetries = 2;
-
-    while (retries <= maxRetries) {
-      try {
-        await Nearby().requestConnection(
-          deviceId,
-          device.deviceId,
-          onConnectionInitiated: _onConnectionInitiated,
-          onConnectionResult: (id, status) {
-            _connectingDeviceIds.remove(id);
-            _onConnectionResult(id, status);
-          },
-          onDisconnected: (id) {
-            _connectingDeviceIds.remove(id);
-            _onDisconnected(id);
-          },
-        ).timeout(const Duration(seconds: 15));
-        return; // Success or initiated
-      } catch (e) {
-        retries++;
-        if (retries <= maxRetries) {
-          await Future.delayed(Duration(seconds: 2 * retries));
-        } else {
-          _connectingDeviceIds.remove(device.deviceId);
-          developer.log('MeshService: Failed to connect to ${device.deviceId} after $maxRetries retries', name: 'MeshService');
-        }
-      }
+    
+    try {
+      developer.log('[NULLSIGNAL] MeshService: Connecting to ${device.deviceId}...', name: 'MeshService');
+      await Nearby().requestConnection(
+        deviceId,
+        device.deviceId,
+        onConnectionInitiated: _onConnectionInitiated,
+        onConnectionResult: (id, status) {
+          _connectingDeviceIds.remove(id);
+          _onConnectionResult(id, status);
+        },
+        onDisconnected: (id) {
+          _connectingDeviceIds.remove(id);
+          _onDisconnected(id);
+          Future.delayed(const Duration(seconds: 5), () {
+            final d = _discoveredDevices[id];
+            if (d != null) connect(d);
+          });
+        },
+      ).timeout(const Duration(seconds: 30)); 
+    } catch (e) {
+      _connectingDeviceIds.remove(device.deviceId);
+      developer.log('[NULLSIGNAL] MeshService: FAILED to ${device.deviceId}: $e', name: 'MeshService');
+      Future.delayed(const Duration(seconds: 10), () => connect(device));
     }
   }
 
@@ -399,22 +399,16 @@ class NearbyMeshServiceImpl implements MeshService {
       await _isar.meshPackets.put(packetWithPublicKey);
     });
 
-    if (packet.isGatewayRelay && _gatewayMonitor.isGateway) {
-      _bridgeToInternet(packetWithPublicKey);
-    } else if (packet.isGatewayRelay && packet.priority == PacketPriority.critical && _satelliteService != null) {
-      _satelliteService.isSatelliteAvailable().then((available) {
-        if (available) {
-          _satelliteService.sendViaSatellite(packetWithPublicKey);
-        }
-      });
-    }
-
     final jsonString = jsonEncode(packetWithPublicKey.toJson());
     final bytes = Uint8List.fromList(utf8.encode(jsonString));
     
     for (final device in currentDevices) {
       if (device.isConnected) {
-        await Nearby().sendBytesPayload(device.deviceId, bytes);
+        try {
+          await Nearby().sendBytesPayload(device.deviceId, bytes);
+        } catch (e) {
+          developer.log('[NULLSIGNAL] MeshService: Send Error to ${device.deviceId}: $e', name: 'MeshService');
+        }
       }
     }
   }

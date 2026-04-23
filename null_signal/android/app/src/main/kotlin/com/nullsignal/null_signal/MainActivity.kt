@@ -2,162 +2,133 @@ package com.nullsignal.null_signal
 
 import android.util.Log
 import androidx.annotation.NonNull
+import com.google.mediapipe.tasks.genai.llminference.LlmInference
+import com.google.mediapipe.tasks.genai.llminference.LlmInference.LlmInferenceOptions
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
-import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
-import kotlinx.coroutines.flow.catch
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
+import java.io.File
+import java.net.URL
+import java.net.HttpURLConnection
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.nullsignal/aicore"
-    private var generativeModel: com.google.mlkit.genai.prompt.GenerativeModel? = null
-    private val mainScope = CoroutineScope(Dispatchers.Main)
+    private val MODEL_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm?download=true"
+    private val MODEL_FILENAME = "gemma-4-e2b-it.litertlm"
+
+    private var llmInference: LlmInference? = null
     private var methodChannel: MethodChannel? = null
+    private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
 
     override fun configureFlutterEngine(@NonNull flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        
         methodChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
-        
         methodChannel?.setMethodCallHandler { call, result ->
             when (call.method) {
-                "initializeModel" -> initializeGeminiNano(result)
-                "isSupported" -> result.success(android.os.Build.VERSION.SDK_INT >= 34)
-                "generateResponse" -> {
-                    val prompt = call.argument<String>("prompt") ?: ""
-                    generateAiResponse(prompt, result)
-                }
+                "isSupported" -> result.success(true) 
+                "initializeModel" -> initializeMediaPipe(result)
+                "generateResponse" -> generateResponse(call.argument<String>("prompt") ?: "", result)
                 else -> result.notImplemented()
             }
         }
     }
 
-    private fun initializeGeminiNano(result: MethodChannel.Result) {
-        GlobalScope.launch(Dispatchers.IO) {
+    private fun initializeMediaPipe(result: MethodChannel.Result) {
+        scope.launch {
+            val modelFile = File(filesDir, MODEL_FILENAME)
+            if (!modelFile.exists() || modelFile.length() < 2500000000) {
+                window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                if (filesDir.usableSpace / (1024 * 1024) < 3000) {
+                    result.error("STORAGE_LOW", "3GB free space required", null)
+                    return@launch
+                }
+                var success = false
+                var attempts = 0
+                while (!success && attempts < 3) {
+                    success = withContext(Dispatchers.IO) { downloadModel(MODEL_URL, modelFile) }
+                    if (!success) { attempts++; delay(3000) }
+                }
+                if (!success) {
+                    result.error("DOWNLOAD_FAILED", "Check HF Token/Network", null)
+                    return@launch
+                }
+            }
             try {
-                val model = com.google.mlkit.genai.prompt.Generation.getClient()
-                var status = model.checkStatus()
-                
-                Log.d("GeminiNano", "Initial Status Check: $status")
+                val options = LlmInferenceOptions.builder()
+                    .setModelPath(modelFile.absolutePath)
+                    .setMaxTokens(1024)
+                    .build()
+                llmInference = withContext(Dispatchers.IO) { LlmInference.createFromOptions(context, options) }
+                methodChannel?.invokeMethod("onProgress", 100)
+                result.success(true)
+            } catch (e: Exception) {
+                result.error("LOAD_FAILED", e.message, null)
+            }
+        }
+    }
 
-                // S24/S25 specific: Sometimes UNAVAILABLE just means AICore needs a kick.
-                // We'll proceed to check for download anyway if on a supported device.
-                val isS24 = android.os.Build.MODEL.contains("S938") || android.os.Build.MODEL.contains("S928")
-                
-                withContext(Dispatchers.Main) {
-                    when {
-                        status == com.google.mlkit.genai.common.FeatureStatus.AVAILABLE -> {
-                            Log.d("GeminiNano", "Model available. Finalizing...")
-                            generativeModel = model
-                            launch(Dispatchers.IO) { model.warmup() }
-                            methodChannel?.invokeMethod("onProgress", 100)
-                            result.success(true)
-                        }
-                        status == com.google.mlkit.genai.common.FeatureStatus.DOWNLOADABLE || 
-                        status == com.google.mlkit.genai.common.FeatureStatus.DOWNLOADING || 
-                        (status == com.google.mlkit.genai.common.FeatureStatus.UNAVAILABLE && isS24) -> {
-                            
-                            Log.d("GeminiNano", "Triggering/Attaching to Download flow (Status: $status)...")
-                            
-                            launch {
-                                var totalBytesToDownload = 0L
-                                model.download()
-                                    .onStart { 
-                                        Log.d("GeminiNano", "Download flow started")
-                                        withContext(Dispatchers.Main) {
-                                            methodChannel?.invokeMethod("onProgress", 1) 
-                                        }
-                                    }
-                                    .catch { e ->
-                                        Log.e("GeminiNano", "Download flow failed", e)
-                                        withContext(Dispatchers.Main) {
-                                            methodChannel?.invokeMethod("onProgress", -1) 
-                                            // Fallback result if download fails
-                                            if (!result.toString().contains("ReplyAlreadySent")) {
-                                                result.error("DOWNLOAD_FAILED", e.message, null)
-                                            }
-                                        }
-                                    }
-                                    .collect { progressStatus ->
-                                        withContext(Dispatchers.Main) {
-                                            var normalizedProgress = 5
-                                            if (progressStatus is com.google.mlkit.genai.common.DownloadStatus.DownloadProgress) {
-                                                val downloaded = progressStatus.totalBytesDownloaded
-                                                normalizedProgress = if (totalBytesToDownload > 0) {
-                                                    ((downloaded.toFloat() / totalBytesToDownload) * 100).toInt()
-                                                } else {
-                                                    5
-                                                }
-                                            } else if (progressStatus is com.google.mlkit.genai.common.DownloadStatus.DownloadStarted) {
-                                                totalBytesToDownload = progressStatus.bytesToDownload
-                                                normalizedProgress = 2
-                                            } else if (progressStatus is com.google.mlkit.genai.common.DownloadStatus.DownloadCompleted) {
-                                                normalizedProgress = 100
-                                            }
-                                            
-                                            Log.d("GeminiNano", "Raw Status: $progressStatus, Normalized: $normalizedProgress")
-                                            methodChannel?.invokeMethod("onProgress", normalizedProgress)
-                                        }
-                                    }
-                                
-                                Log.d("GeminiNano", "Download completed. Initializing model...")
-                                generativeModel = model
-                                withContext(Dispatchers.IO) { model.warmup() }
-                                withContext(Dispatchers.Main) {
-                                    methodChannel?.invokeMethod("onProgress", 100)
+    private suspend fun downloadModel(urlStr: String, outputFile: File): Boolean {
+        var currentUrl = urlStr
+        var redirected = false
+        return try {
+            withContext(Dispatchers.IO) {
+                for (i in 1..5) {
+                    val url = URL(currentUrl)
+                    val conn = url.openConnection() as HttpURLConnection
+                    conn.instanceFollowRedirects = false
+                    val hfToken = BuildConfig.HF_TOKEN
+                    if (hfToken.isNotEmpty() && !redirected) conn.setRequestProperty("Authorization", "Bearer $hfToken")
+                    
+                    val startByte = if (outputFile.exists() && !redirected) outputFile.length() else 0L
+                    if (startByte > 0) conn.setRequestProperty("Range", "bytes=$startByte-")
+
+                    conn.connectTimeout = 30000
+                    if (conn.responseCode in 301..308) {
+                        currentUrl = conn.getHeaderField("Location") ?: break
+                        redirected = true
+                        continue
+                    }
+                    if (conn.responseCode != 200 && conn.responseCode != 206) return@withContext false
+
+                    val total = if (conn.responseCode == 206) {
+                        conn.getHeaderField("Content-Range")?.substringAfterLast("/")?.toLong() ?: -1L
+                    } else conn.contentLength.toLong()
+
+                    conn.inputStream.use { input ->
+                        java.io.FileOutputStream(outputFile, conn.responseCode == 206).use { output ->
+                            val buffer = ByteArray(65536)
+                            var downloaded = if (conn.responseCode == 206) startByte else 0L
+                            var lastProg = -1
+                            var bytes = input.read(buffer)
+                            while (bytes >= 0) {
+                                output.write(buffer, 0, bytes)
+                                downloaded += bytes
+                                val prog = if (total > 0) (downloaded * 100 / total).toInt() else 0
+                                if (prog != lastProg && prog % 5 == 0) {
+                                    lastProg = prog
+                                    withContext(Dispatchers.Main) { methodChannel?.invokeMethod("onProgress", prog) }
                                 }
+                                bytes = input.read(buffer)
                             }
-                            // Don't return success yet, the flow is asynchronous
-                            if (!result.toString().contains("ReplyAlreadySent")) {
-                                result.success(false) 
-                            }
-                        }
-                        else -> {
-                            Log.e("GeminiNano", "Unsupported state: $status")
-                            result.error("UNAVAILABLE", "Gemini Nano not supported on this device. Status: $status", status.toString())
                         }
                     }
+                    return@withContext true
                 }
-            } catch (e: Exception) {
-                Log.e("GeminiNano", "Fatal Init Error", e)
-                withContext(Dispatchers.Main) {
-                    result.error("INIT_ERROR", "Internal failure: ${e.message}", null)
-                }
+                false
             }
-        }
+        } catch (e: Exception) { Log.e("MediaPipe", "Err: ${e.message}"); false }
     }
 
-    private fun generateAiResponse(prompt: String, result: MethodChannel.Result) {
-        val model = generativeModel
-        if (model == null) {
-            result.error("NOT_INITIALIZED", "Model not initialized. Call initializeModel first.", null)
-            return
-        }
-
-        mainScope.launch {
+    private fun generateResponse(prompt: String, result: MethodChannel.Result) {
+        val model = llmInference ?: return result.error("NOT_READY", "Wait for download", null)
+        scope.launch {
             try {
-                val request = com.google.mlkit.genai.prompt.GenerateContentRequest.Builder(
-                    com.google.mlkit.genai.prompt.TextPart(prompt)
-                ).build()
-
-                val response: com.google.mlkit.genai.prompt.GenerateContentResponse = withContext(Dispatchers.IO) {
-                    model.generateContent(request)
-                }
-
-                val generatedText = response.candidates.firstOrNull()?.text
-                
-                result.success(generatedText ?: "No response generated")
-            } catch (e: Exception) {
-                Log.e("GeminiNano", "Generation error", e)
-                result.error("GEN_ERROR", e.message, null)
-            }
+                val resp = withContext(Dispatchers.IO) { model.generateResponse(prompt) }
+                result.success(resp)
+            } catch (e: Exception) { result.error("GEN_ERROR", e.message, null) }
         }
     }
+
+    override fun onDestroy() { scope.cancel(); llmInference?.close(); super.onDestroy() }
 }
