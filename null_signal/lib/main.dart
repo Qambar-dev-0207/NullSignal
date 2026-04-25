@@ -83,8 +83,13 @@ void main() async {
     aiService.initialize().catchError((e) => developer.log('[AI] Init Error: $e', name: 'System'));
 
     final meshInsightService = MeshInsightServiceImpl(meshService, aiService, isar);
-    final resourceBroker = ResourceBrokerService(meshService, aiService, isar);
-    final intelligenceService = IntelligenceServiceImpl(meshService, gatewayMonitor, aiService);
+    final resourceBroker = ResourceBrokerService(meshService, aiService, isar, securityService);
+    final intelligenceService = IntelligenceServiceImpl(meshService, gatewayMonitor, aiService, securityService);
+    
+    // Start background background services
+    meshInsightService.start();
+    resourceBroker.start();
+    intelligenceService.start();
     
     developer.log('[SYSTEM] UI Ready', name: 'System');
     runApp(NullSignalApp(

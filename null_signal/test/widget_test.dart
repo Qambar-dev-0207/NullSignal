@@ -58,7 +58,7 @@ void main() {
     final securityService = SecurityService(isar);
     final meshService = SimulatedMeshService(gatewayMonitor, securityService, isar);
     final safetyMonitor = SafetyMonitor();
-    final resourceBroker = ResourceBrokerService(meshService, aiService, isar);
+    final resourceBroker = ResourceBrokerService(meshService, aiService, isar, securityService);
 
     await tester.pumpWidget(NullSignalApp(
       meshService: meshService,

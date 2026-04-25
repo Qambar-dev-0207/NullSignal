@@ -75,8 +75,7 @@ void main() {
         ),
       );
 
-      expect(find.text('SEND SOS'), findsOneWidget);
-      expect(find.text('BROADCAST EMERGENCY'), findsOneWidget);
+      expect(find.text('HOLD TO TRIGGER\nSOS SIGNAL'), findsOneWidget);
     });
 
     test('UIOrchestrator should toggle state', () {

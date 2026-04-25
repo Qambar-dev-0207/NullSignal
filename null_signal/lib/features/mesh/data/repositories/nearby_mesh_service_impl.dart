@@ -43,6 +43,7 @@ class NearbyMeshServiceImpl implements MeshService {
   final PublishSubject<MeshPacket> _incomingPacketsSubject = PublishSubject<MeshPacket>();
 
   final Map<String, MeshDevice> _discoveredDevices = {};
+  final Map<String, String> _endpointToDeviceId = {};
 
   @override
   Stream<List<MeshDevice>> get devicesStream => _devicesSubject.stream;
@@ -59,11 +60,10 @@ class NearbyMeshServiceImpl implements MeshService {
   Future<bool> _checkPermissions() async {
     developer.log('[NULLSIGNAL] MeshService: Requesting Mesh Permissions...', name: 'MeshService');
     
+    // 1. Basic permission checks
     List<Permission> permissions = [
       Permission.location,
-      Permission.locationAlways,
       Permission.nearbyWifiDevices,
-      Permission.bluetooth,
       Permission.bluetoothScan,
       Permission.bluetoothAdvertise,
       Permission.bluetoothConnect,
@@ -73,8 +73,8 @@ class NearbyMeshServiceImpl implements MeshService {
     
     bool allGranted = true;
     statuses.forEach((permission, status) {
-      developer.log('[NULLSIGNAL] MeshService: Permission $permission -> $status', name: 'MeshService');
-      if (permission != Permission.locationAlways && !status.isGranted) {
+      if (!status.isGranted && permission != Permission.locationAlways) {
+        developer.log('[NULLSIGNAL] MeshService: Permission $permission DENIED', name: 'MeshService');
         allGranted = false;
       }
     });
@@ -87,7 +87,7 @@ class NearbyMeshServiceImpl implements MeshService {
     developer.log('[NULLSIGNAL] MeshService: STARTING with ID: $deviceId', name: 'MeshService');
     
     if (!await _checkPermissions()) {
-      developer.log('[NULLSIGNAL] MeshService: CRITICAL - Permissions denied.', name: 'MeshService');
+      developer.log('[NULLSIGNAL] MeshService: CRITICAL - Permissions missing.', name: 'MeshService');
       return;
     }
 
@@ -96,8 +96,8 @@ class NearbyMeshServiceImpl implements MeshService {
 
     // 1. Start Advertising
     try {
-      developer.log('[NULLSIGNAL] MeshService: Activating Advertising...', name: 'MeshService');
-      await Nearby().startAdvertising(
+      developer.log('[NULLSIGNAL] MeshService: Activating Advertising as $advertisingName...', name: 'MeshService');
+      bool started = await Nearby().startAdvertising(
         advertisingName,
         _strategy,
         onConnectionInitiated: _onConnectionInitiated,
@@ -111,6 +111,9 @@ class NearbyMeshServiceImpl implements MeshService {
         },
         serviceId: _serviceId,
       );
+      if (!started) {
+        developer.log('[NULLSIGNAL] MeshService: Advertising failed to start (returned false)', name: 'MeshService');
+      }
     } catch (e) {
       developer.log('[NULLSIGNAL] MeshService: Advertising ERROR: $e', name: 'MeshService');
     }
@@ -118,8 +121,8 @@ class NearbyMeshServiceImpl implements MeshService {
     // 2. Start Discovery
     try {
       developer.log('[NULLSIGNAL] MeshService: Activating Discovery...', name: 'MeshService');
-      await Nearby().startDiscovery(
-        advertisingName,
+      bool started = await Nearby().startDiscovery(
+        deviceId, // Discovery name
         _strategy,
         onEndpointFound: (id, name, serviceId) {
           developer.log('[NULLSIGNAL] MeshService: NODE FOUND: $id ($name)', name: 'MeshService');
@@ -134,6 +137,7 @@ class NearbyMeshServiceImpl implements MeshService {
           _discoveredDevices[id] = device;
           _updateDevices();
           
+          // Use device ID comparison for deterministic connection initiator
           if (deviceId.compareTo(id) < 0) {
             developer.log('[NULLSIGNAL] MeshService: Primary. Initiating to $id...', name: 'MeshService');
             connect(device);
@@ -142,10 +146,14 @@ class NearbyMeshServiceImpl implements MeshService {
         onEndpointLost: (id) {
           developer.log('[NULLSIGNAL] MeshService: NODE LOST: $id', name: 'MeshService');
           _discoveredDevices.remove(id);
+          _endpointToDeviceId.remove(id);
           _updateDevices();
         },
         serviceId: _serviceId,
       );
+      if (!started) {
+        developer.log('[NULLSIGNAL] MeshService: Discovery failed to start (returned false)', name: 'MeshService');
+      }
     } catch (e) {
       developer.log('[NULLSIGNAL] MeshService: Discovery ERROR: $e', name: 'MeshService');
     }
@@ -198,7 +206,7 @@ class NearbyMeshServiceImpl implements MeshService {
   }
 
   void _onConnectionInitiated(String id, ConnectionInfo info) {
-    developer.log('[NULLSIGNAL] MeshService: Accepting $id ($info)', name: 'MeshService');
+    developer.log('[NULLSIGNAL] MeshService: Accepting connection from $id (${info.endpointName})', name: 'MeshService');
     Nearby().acceptConnection(
       id,
       onPayLoadRecieved: (id, payload) async {
@@ -214,50 +222,79 @@ class NearbyMeshServiceImpl implements MeshService {
             final senderPublicKey = SimplePublicKey(publicKeyBytes, type: KeyPairType.ed25519);
             final isValid = await _securityService.verify(packet.payload, packet.signature, senderPublicKey);
             
-            if (!isValid) return;
-
-            final receiverId = packet.receiverId;
-            if (receiverId == deviceId || receiverId == null) {
-              if (packet.payload != 'HEARTBEAT') {
-                _incomingPacketsSubject.add(packet);
-              }
-              if (receiverId == deviceId) return;
+            if (!isValid) {
+              developer.log('[NULLSIGNAL] MeshService: Invalid Signature on packet ${packet.packetId}', name: 'MeshService');
+              return;
             }
 
-            if (!await _routingEngine.shouldForward(packet, deviceId)) return;
+            // Update mapping and device info
+            _endpointToDeviceId[id] = packet.senderId;
+            final device = _discoveredDevices[id];
+            if (device != null && device.publicKey == null) {
+              _discoveredDevices[id] = device.copyWith(publicKey: packet.senderPublicKey);
+              _updateDevices();
+            }
 
+            // 1. Check if we've already seen this packet to prevent loops/duplicates
+            if (!await _routingEngine.shouldForward(packet, deviceId)) {
+              // Note: shouldForward returns false if it's already seen OR if it's for us.
+            }
+            
+            // Re-evaluating routing check:
+            final isNew = (await _isar.seenPackets.filter().packetIdEqualTo(packet.packetId).findFirst()) == null;
+            if (!isNew) return; // Skip duplicate processing
+
+            // 2. Mark as seen
             await _isar.writeTxn(() async {
-              final existingPeer = await _isar.peers.filter().deviceIdEqualTo(packet.senderId).findFirst();
-              if (existingPeer == null) {
-                final device = _discoveredDevices[id];
-                final newPeer = Peer(
-                  deviceId: packet.senderId,
-                  deviceName: device?.deviceName ?? 'Unknown Node',
-                  publicKey: packet.senderPublicKey,
-                  lastSeen: DateTime.now().millisecondsSinceEpoch,
-                );
-                await _isar.peers.put(newPeer);
-              } else {
-                final updatedPeer = existingPeer.copyWith(
-                  publicKey: packet.senderPublicKey,
-                  lastSeen: DateTime.now().millisecondsSinceEpoch,
-                );
-                await _isar.peers.put(updatedPeer);
-              }
-              await _isar.meshPackets.put(packet);
+              await _isar.seenPackets.put(SeenPacket(
+                packetId: packet.packetId,
+                timestamp: DateTime.now().millisecondsSinceEpoch,
+              ));
             });
 
+            final receiverId = packet.receiverId;
+            final forUs = receiverId == deviceId || receiverId == null;
+
+            if (forUs && packet.payload != 'HEARTBEAT') {
+              _incomingPacketsSubject.add(packet);
+            }
+
+            // 3. Save to history (except Heartbeats)
+            if (packet.payload != 'HEARTBEAT') {
+              await _isar.writeTxn(() async {
+                final existingPeer = await _isar.peers.filter().deviceIdEqualTo(packet.senderId).findFirst();
+                if (existingPeer == null) {
+                  final newPeer = Peer(
+                    deviceId: packet.senderId,
+                    deviceName: device?.deviceName ?? 'Unknown Node',
+                    publicKey: packet.senderPublicKey,
+                    lastSeen: DateTime.now().millisecondsSinceEpoch,
+                  );
+                  await _isar.peers.put(newPeer);
+                } else {
+                  final updatedPeer = existingPeer.copyWith(
+                    publicKey: packet.senderPublicKey,
+                    lastSeen: DateTime.now().millisecondsSinceEpoch,
+                  );
+                  await _isar.peers.put(updatedPeer);
+                }
+                await _isar.meshPackets.put(packet);
+              });
+            }
+
+            // 4. Internet Gateway Relay
             if (packet.isGatewayRelay && _gatewayMonitor.isGateway) {
               _bridgeToInternet(packet);
             }
             
-            final forwardedPacket = _routingEngine.decrementTtl(packet);
-            sendPacket(forwardedPacket);
-            
-            if (packet.payload != 'HEARTBEAT') {
-              _incomingPacketsSubject.add(packet);
+            // 5. Forwarding logic
+            if (packet.ttl > 0 && receiverId != deviceId) {
+              final forwardedPacket = _routingEngine.decrementTtl(packet);
+              sendPacket(forwardedPacket);
             }
-          } catch (_) {}
+          } catch (e) {
+            developer.log('[NULLSIGNAL] MeshService: Packet Processing Error: $e', name: 'MeshService');
+          }
         }
       },
       onPayloadTransferUpdate: (id, payloadTransferUpdate) {},
@@ -323,6 +360,7 @@ class NearbyMeshServiceImpl implements MeshService {
     await Nearby().stopDiscovery();
     await Nearby().stopAllEndpoints();
     _discoveredDevices.clear();
+    _endpointToDeviceId.clear();
     _updateDevices();
   }
 

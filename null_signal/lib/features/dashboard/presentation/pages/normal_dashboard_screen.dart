@@ -76,7 +76,7 @@ class NormalDashboardScreen extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(height: 16),
-                      _buildQuickActions(colors, textTheme),
+                      _buildQuickActions(context, colors, textTheme),
                     ],
                   ),
                 ),
@@ -482,7 +482,7 @@ class NormalDashboardScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildQuickActions(NullSignalColors colors, TextTheme textTheme) {
+  Widget _buildQuickActions(BuildContext context, NullSignalColors colors, TextTheme textTheme) {
     return Row(
       children: [
         _buildActionIcon(Icons.search, colors),
@@ -504,23 +504,26 @@ class NormalDashboardScreen extends StatelessWidget {
         _buildActionIcon(Icons.key, colors),
         const SizedBox(width: 12),
         Expanded(
-          child: Container(
-            height: 54,
-            decoration: BoxDecoration(
-              color: colors.primary,
-              borderRadius: BorderRadius.circular(16),
-              boxShadow: [
-                BoxShadow(
-                  color: colors.primary.withValues(alpha: 0.3),
-                  blurRadius: 12,
-                  offset: const Offset(0, 4),
+          child: GestureDetector(
+            onTap: () => context.read<MeshCubit>().startScanning(),
+            child: Container(
+              height: 54,
+              decoration: BoxDecoration(
+                color: colors.primary,
+                borderRadius: BorderRadius.circular(16),
+                boxShadow: [
+                  BoxShadow(
+                    color: colors.primary.withValues(alpha: 0.3),
+                    blurRadius: 12,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: const Center(
+                child: Text(
+                  'SYSTEM RE-SCAN',
+                  style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 2.0),
                 ),
-              ],
-            ),
-            child: const Center(
-              child: Text(
-                'SYSTEM RE-SCAN',
-                style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 2.0),
               ),
             ),
           ),

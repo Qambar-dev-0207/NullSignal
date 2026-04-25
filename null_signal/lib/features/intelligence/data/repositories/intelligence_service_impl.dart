@@ -1,13 +1,16 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:convert';
 import 'package:null_signal/core/models/mesh_packet.dart';
 import 'package:null_signal/core/services/mesh_service.dart';
 import 'package:null_signal/core/services/gateway_monitor.dart';
+import 'package:null_signal/core/services/security_service.dart';
 import 'package:null_signal/features/ai/domain/repositories/ai_service.dart';
 import 'package:null_signal/features/intelligence/domain/repositories/intelligence_service.dart';
 import 'package:sensors_plus/sensors_plus.dart';
 import 'package:rxdart/rxdart.dart';
 import 'package:uuid/uuid.dart';
+import 'package:cryptography/cryptography.dart';
 
 import 'package:latlong2/latlong.dart';
 import 'package:geolocator/geolocator.dart';
@@ -16,6 +19,7 @@ class IntelligenceServiceImpl implements IntelligenceService {
   final MeshService _meshService;
   final GatewayMonitor _gatewayMonitor;
   final AIService _aiService;
+  final SecurityService _securityService;
   static const double maxHazardRadiusKm = 10.0;
 
   // Streams
@@ -33,7 +37,7 @@ class IntelligenceServiceImpl implements IntelligenceService {
   final List<int> _crowdHistory = [];
   static const double seismicSpikeThreshold = 15.0;
 
-  IntelligenceServiceImpl(this._meshService, this._gatewayMonitor, this._aiService);
+  IntelligenceServiceImpl(this._meshService, this._gatewayMonitor, this._aiService, this._securityService);
 
   @override
   Stream<List<String>> get hazardPolygonsStream => _polygonsSubject.stream;
@@ -148,13 +152,18 @@ class IntelligenceServiceImpl implements IntelligenceService {
 
   // --- Helper ---
   Future<void> _broadcastPacket(PacketType type, String payload, PacketPriority priority) async {
+    final keyPair = await _securityService.getOrCreateIdentity();
+    final signature = await _securityService.sign(payload, keyPair);
+    final publicKey = await keyPair.extractPublicKey();
+    final publicKeyBase64 = base64.encode((publicKey as SimplePublicKey).bytes);
+
     final packet = MeshPacket(
       packetId: const Uuid().v4(),
       senderId: _meshService.deviceId,
-      senderPublicKey: '', 
+      senderPublicKey: publicKeyBase64,
       packetType: type,
       payload: payload,
-      signature: '',
+      signature: signature,
       timestamp: DateTime.now().millisecondsSinceEpoch,
       ttl: 4,
       priority: priority,
