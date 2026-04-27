@@ -7,6 +7,9 @@ abstract class AIService {
   /// Initializes the on-device AI model
   Future<void> initialize();
 
+  /// Stream of download progress for the AI model (0-100, -1 for error)
+  Stream<int> get downloadProgress;
+
   /// Gets a triage scoring response based on user symptoms
   Future<String> getTriageResponse(String symptoms);
 

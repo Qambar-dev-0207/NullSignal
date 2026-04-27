@@ -25,6 +25,9 @@ class IosAIService implements AIService {
   }
 
   @override
+  Stream<int> get downloadProgress => Stream.value(100);
+
+  @override
   Future<String> getTriageResponse(String symptoms) async {
     return chat('Triage this survivor: $symptoms. Assign a START triage color (Green/Yellow/Red) and explain why.');
   }

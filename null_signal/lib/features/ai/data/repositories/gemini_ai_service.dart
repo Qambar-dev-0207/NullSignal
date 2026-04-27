@@ -12,12 +12,13 @@ class GeminiAIService implements AIService {
 
   bool get isProvisioned {
     if (nativeService is AndroidAIService) {
-      return (nativeService as AndroidAIService).currentProgress >= 100;
+      return (nativeService as AndroidAIService).currentProgress == 100;
     }
     // For iOS, assume provisioned once initialized (AppDelegate handles download internally)
     return true;
   }
 
+  @override
   Stream<int> get downloadProgress {
     if (nativeService is AndroidAIService) {
       return (nativeService as AndroidAIService).downloadProgress;

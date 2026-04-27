@@ -5,10 +5,17 @@ import 'package:null_signal/features/ai/data/models/chat_message.dart';
 import 'package:null_signal/features/ai/domain/entities/sector_summary.dart';
 import 'package:null_signal/features/ai/domain/repositories/ai_service.dart';
 import 'package:null_signal/features/ai/domain/repositories/mesh_insight_service.dart';
+import 'package:null_signal/features/ai/data/repositories/gemini_ai_service.dart';
+import 'package:null_signal/features/ai/data/repositories/android_ai_service.dart';
 
 abstract class AiState {}
 
 class AiInitial extends AiState {}
+class AiProvisioning extends AiState {
+  final int progress;
+  final bool isError;
+  AiProvisioning(this.progress, {this.isError = false});
+}
 class AiLoading extends AiState {
   final List<ChatMessage> history;
   AiLoading({this.history = const []});
@@ -30,10 +37,18 @@ class AiCubit extends Cubit<AiState> {
   final AIService _aiService;
   final MeshInsightService _meshInsightService;
   final Isar _isar;
+  StreamSubscription? _downloadSub;
 
   AiCubit(this._aiService, this._meshInsightService, this._isar) : super(AiInitial());
 
   Future<void> initialize() async {
+    _downloadSub?.cancel();
+    _downloadSub = _aiService.downloadProgress.listen((progress) {
+      if (progress < 100) {
+        emit(AiProvisioning(progress, isError: progress == -1));
+      }
+    });
+
     try {
       await _aiService.initialize();
       _meshInsightService.start();
@@ -49,8 +64,26 @@ class AiCubit extends Cubit<AiState> {
       final summaries = await _meshInsightService.getStoredSummaries();
       emit(AiResponse('SYSTEM READY', 'Nano AI online.', history: history, sectorSummaries: summaries));
     } catch (e) {
-      emit(AiError('AI Initialization Failed: $e'));
+      if (state is! AiProvisioning) {
+        emit(AiError('AI Initialization Failed: $e'));
+      }
     }
+  }
+
+  Future<void> forceRedownload() async {
+    final aiService = _aiService;
+    if (aiService is GeminiAIService) {
+      if (aiService.nativeService is AndroidAIService) {
+        await (aiService.nativeService as AndroidAIService).deleteModel();
+        initialize();
+      }
+    }
+  }
+
+  @override
+  Future<void> close() {
+    _downloadSub?.cancel();
+    return super.close();
   }
 
   Future<List<ChatMessage>> _getHistory() async {

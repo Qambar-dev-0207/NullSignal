@@ -10,6 +10,7 @@ class AndroidAIService implements AIService {
   int _lastProgress = 0;
   final bool useGPU;
 
+  @override
   Stream<int> get downloadProgress async* {
     yield _lastProgress;
     yield* _progressController.stream;
@@ -49,6 +50,16 @@ class AndroidAIService implements AIService {
       await _channel.invokeMethod('initializeModel', {'useGPU': useGPU});
     } on PlatformException catch (e) {
       throw 'Failed to initialize Offline AI (Gemma): ${e.message}';
+    }
+  }
+
+  Future<void> deleteModel() async {
+    try {
+      await _channel.invokeMethod('deleteModel');
+      _lastProgress = 0;
+      _progressController.add(0);
+    } catch (e) {
+      developer.log('Failed to delete model: $e');
     }
   }
 

@@ -55,7 +55,7 @@ android {
 }
 
 dependencies {
-    implementation("com.google.mediapipe:tasks-genai:0.10.14")
+    implementation("com.google.mediapipe:tasks-genai:0.10.33")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
 }
 

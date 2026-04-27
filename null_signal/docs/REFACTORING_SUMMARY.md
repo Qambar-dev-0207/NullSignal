@@ -26,4 +26,14 @@ The project has been refactored to consolidate disparate emergency intelligence 
 - [ ] **Real Hardware Sensors**: Test the `SeismicMonitorService` on actual 2026 flagship hardware to calibrate G-force thresholds.
 - [ ] **GEE Auth**: Implement OAuth2 flow for Google Earth Engine API polling on Gateway nodes.
 - [ ] **Production Mesh Service**: Replace `SimulatedMeshService` with a hardened version of `NearbyMeshServiceImpl` for large-scale deployments.
-- [ ] **UI Polish**: Complete the `.withValues()` migration across all remaining theme files (100+ instances remaining).
+- **UI Polish**: Complete the `.withValues()` migration across all remaining theme files (100+ instances remaining).
+
+## 5. Maintenance & Engine Stabilization (April 2026)
+Successfully resolved Android compilation issues and modernized the on-device AI integration.
+
+- **MediaPipe Tasks GenAI Upgrade**: Upgraded `com.google.mediapipe:tasks-genai` from `0.10.14` to `0.10.33` to access the latest performance optimizations and API features.
+- **Android Native Bridge Fix**: Migrated `MainActivity.kt` to the new `LlmInferenceOptions` API, replacing the deprecated `setDelegate` with `setPreferredBackend(LlmInference.Backend.GPU/CPU)`.
+- **Hardware Fallback**: Implemented robust GPU-to-CPU fallback logic in the native Android layer to ensure survival coordination on devices with incompatible NPUs/GPUs.
+- **Static Analysis**: Resolved all linter warnings, including missing `@override` annotations in AI repository implementations and redundant type casts in `AiCubit`.
+- **Provisioning UI**: Added a dedicated overlay in `PanicAIHelpScreen` to visualize the 2.6GB Gemma 4 weight download and engine initialization states.
+

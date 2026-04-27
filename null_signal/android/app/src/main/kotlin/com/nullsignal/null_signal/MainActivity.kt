@@ -15,7 +15,8 @@ import java.net.HttpURLConnection
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "com.nullsignal/aicore"
     private val MODEL_URL = "https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm?download=true"
-    private val MODEL_FILENAME = "gemma-4-e2b-it.litertlm"
+    private val MODEL_FILENAME = "gemma-4-E2B-it.litertlm"
+    private val EXPECTED_MODEL_SIZE = 2583085056L
 
     private var llmInference: LlmInference? = null
     private var methodChannel: MethodChannel? = null
@@ -28,6 +29,11 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "isSupported" -> result.success(true) 
                 "initializeModel" -> initializeMediaPipe(result)
+                "deleteModel" -> {
+                    val modelFile = File(filesDir, MODEL_FILENAME)
+                    if (modelFile.exists()) modelFile.delete()
+                    result.success(true)
+                }
                 "generateResponse" -> generateResponse(call.argument<String>("prompt") ?: "", result)
                 else -> result.notImplemented()
             }
@@ -37,32 +43,69 @@ class MainActivity : FlutterActivity() {
     private fun initializeMediaPipe(result: MethodChannel.Result) {
         scope.launch {
             val modelFile = File(filesDir, MODEL_FILENAME)
-            if (!modelFile.exists() || modelFile.length() < 2500000000) {
+            
+            if (!modelFile.exists() || modelFile.length() < EXPECTED_MODEL_SIZE - 1024) {
+                Log.d("MediaPipe", "Model missing or incomplete: ${modelFile.length()} bytes. Starting download...")
                 window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                if (filesDir.usableSpace / (1024 * 1024) < 3000) {
+                
+                if (filesDir.usableSpace < 3000000000L) {
                     result.error("STORAGE_LOW", "3GB free space required", null)
                     return@launch
                 }
+                
                 var success = false
                 var attempts = 0
-                while (!success && attempts < 3) {
+                while (!success && attempts < 5) {
                     success = withContext(Dispatchers.IO) { downloadModel(MODEL_URL, modelFile) }
-                    if (!success) { attempts++; delay(3000) }
+                    if (!success) { 
+                        attempts++
+                        Log.w("MediaPipe", "Download attempt $attempts failed. Retrying...")
+                        delay(5000) 
+                    }
                 }
-                if (!success) {
-                    result.error("DOWNLOAD_FAILED", "Check HF Token/Network", null)
+                
+                if (!success || modelFile.length() < EXPECTED_MODEL_SIZE - 1024) {
+                    Log.e("MediaPipe", "Download failed or incomplete. Final size: ${modelFile.length()}")
+                    methodChannel?.invokeMethod("onProgress", -1)
+                    result.error("DOWNLOAD_FAILED", "Check connection.", null)
                     return@launch
                 }
             }
+            
             try {
+                Log.d("MediaPipe", "Loading engine... (File size: ${modelFile.length()})")
+                methodChannel?.invokeMethod("onProgress", 99) // Signal loading state
+                
+                // Try GPU first
                 val options = LlmInferenceOptions.builder()
                     .setModelPath(modelFile.absolutePath)
                     .setMaxTokens(1024)
+                    .setPreferredBackend(LlmInference.Backend.GPU)
                     .build()
-                llmInference = withContext(Dispatchers.IO) { LlmInference.createFromOptions(context, options) }
+                
+                llmInference = try {
+                    withContext(Dispatchers.IO) { LlmInference.createFromOptions(context, options) }
+                } catch (e: Exception) {
+                    Log.w("MediaPipe", "GPU init failed, falling back to CPU: ${e.message}")
+                    val cpuOptions = LlmInferenceOptions.builder()
+                        .setModelPath(modelFile.absolutePath)
+                        .setMaxTokens(1024)
+                        .setPreferredBackend(LlmInference.Backend.CPU)
+                        .build()
+                    withContext(Dispatchers.IO) { LlmInference.createFromOptions(context, cpuOptions) }
+                }
+
+                Log.i("MediaPipe", "Model initialized.")
                 methodChannel?.invokeMethod("onProgress", 100)
+                window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                 result.success(true)
             } catch (e: Exception) {
+                Log.e("MediaPipe", "Failed to load model: ${e.message}")
+                // Only delete if size is way off
+                if (modelFile.length() < EXPECTED_MODEL_SIZE / 2) {
+                    modelFile.delete()
+                }
+                methodChannel?.invokeMethod("onProgress", -1)
                 result.error("LOAD_FAILED", e.message, null)
             }
         }
@@ -70,46 +113,65 @@ class MainActivity : FlutterActivity() {
 
     private suspend fun downloadModel(urlStr: String, outputFile: File): Boolean {
         var currentUrl = urlStr
-        var redirected = false
+        var redirectedCount = 0
+        val hfToken = BuildConfig.HF_TOKEN
+        
         return try {
             withContext(Dispatchers.IO) {
-                for (i in 1..5) {
+                while (redirectedCount < 10) {
                     val url = URL(currentUrl)
                     val conn = url.openConnection() as HttpURLConnection
                     conn.instanceFollowRedirects = false
-                    val hfToken = BuildConfig.HF_TOKEN
-                    if (hfToken.isNotEmpty() && !redirected) conn.setRequestProperty("Authorization", "Bearer $hfToken")
+                    conn.connectTimeout = 60000
+                    conn.readTimeout = 60000
+                    conn.setRequestProperty("User-Agent", "NullSignal/1.1 (Android)")
                     
-                    val startByte = if (outputFile.exists() && !redirected) outputFile.length() else 0L
-                    if (startByte > 0) conn.setRequestProperty("Range", "bytes=$startByte-")
+                    val isMainHfDomain = currentUrl.startsWith("https://huggingface.co") || 
+                                       currentUrl.startsWith("https://hf.co")
+                    if (hfToken.isNotEmpty() && isMainHfDomain && redirectedCount == 0) {
+                        conn.setRequestProperty("Authorization", "Bearer $hfToken")
+                    }
+                    
+                    val startByte = if (outputFile.exists()) outputFile.length() else 0L
+                    if (startByte > 0) {
+                        conn.setRequestProperty("Range", "bytes=$startByte-")
+                    }
 
-                    conn.connectTimeout = 30000
-                    if (conn.responseCode in 301..308) {
+                    val responseCode = conn.responseCode
+                    if (responseCode in 301..308) {
                         currentUrl = conn.getHeaderField("Location") ?: break
-                        redirected = true
+                        redirectedCount++
                         continue
                     }
-                    if (conn.responseCode != 200 && conn.responseCode != 206) return@withContext false
 
-                    val total = if (conn.responseCode == 206) {
-                        conn.getHeaderField("Content-Range")?.substringAfterLast("/")?.toLong() ?: -1L
-                    } else conn.contentLength.toLong()
+                    if (responseCode != 200 && responseCode != 206) {
+                        Log.e("MediaPipe", "HTTP $responseCode for $currentUrl")
+                        return@withContext false
+                    }
+
+                    val isResuming = responseCode == 206
+                    val contentLength = conn.contentLength.toLong()
+                    val total = if (isResuming) startByte + contentLength else if (contentLength > 0) contentLength else EXPECTED_MODEL_SIZE
 
                     conn.inputStream.use { input ->
-                        java.io.FileOutputStream(outputFile, conn.responseCode == 206).use { output ->
-                            val buffer = ByteArray(65536)
-                            var downloaded = if (conn.responseCode == 206) startByte else 0L
+                        java.io.FileOutputStream(outputFile, isResuming).use { output ->
+                            val buffer = ByteArray(128 * 1024)
+                            var downloaded = if (isResuming) startByte else 0L
                             var lastProg = -1
-                            var bytes = input.read(buffer)
-                            while (bytes >= 0) {
+                            
+                            while (true) {
+                                val bytes = input.read(buffer)
+                                if (bytes < 0) break
                                 output.write(buffer, 0, bytes)
                                 downloaded += bytes
-                                val prog = if (total > 0) (downloaded * 100 / total).toInt() else 0
-                                if (prog != lastProg && prog % 5 == 0) {
+                                
+                                val prog = (downloaded * 100 / total).toInt()
+                                if (prog != lastProg) {
                                     lastProg = prog
-                                    withContext(Dispatchers.Main) { methodChannel?.invokeMethod("onProgress", prog) }
+                                    withContext(Dispatchers.Main) { 
+                                        methodChannel?.invokeMethod("onProgress", prog) 
+                                    }
                                 }
-                                bytes = input.read(buffer)
                             }
                         }
                     }
@@ -117,7 +179,10 @@ class MainActivity : FlutterActivity() {
                 }
                 false
             }
-        } catch (e: Exception) { Log.e("MediaPipe", "Err: ${e.message}"); false }
+        } catch (e: Exception) { 
+            Log.e("MediaPipe", "Download Error: ${e.message}")
+            false 
+        }
     }
 
     private fun generateResponse(prompt: String, result: MethodChannel.Result) {

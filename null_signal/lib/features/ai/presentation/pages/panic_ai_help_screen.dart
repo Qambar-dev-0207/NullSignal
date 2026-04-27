@@ -70,6 +70,10 @@ class _PanicAIHelpScreenState extends State<PanicAIHelpScreen> {
           }
         },
         builder: (context, state) {
+          if (state is AiProvisioning) {
+            return _buildProvisioningOverlay(context, state, colors, textTheme);
+          }
+
           List<ChatMessage> history = [];
           List<SectorSummary> sectorSummaries = [];
           if (state is AiResponse) {
@@ -474,6 +478,125 @@ class _PanicAIHelpScreenState extends State<PanicAIHelpScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildProvisioningOverlay(BuildContext context, AiProvisioning state, NullSignalColors colors, TextTheme textTheme) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32.0),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                color: colors.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: state.isError ? colors.error.withValues(alpha: 0.3) : colors.primary.withValues(alpha: 0.1)),
+                boxShadow: [
+                  BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 40, offset: const Offset(0, 10)),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    state.isError ? Icons.sync_problem : Icons.cloud_download,
+                    size: 48,
+                    color: state.isError ? colors.error : colors.primary,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    state.isError ? 'PROVISIONING FAILED' : (state.progress == 99 ? 'INITIALIZING ENGINE' : 'PROVISIONING OFFLINE AI'),
+                    style: textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.5,
+                      color: state.isError ? colors.error : colors.onSurface,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    state.isError 
+                      ? 'Connection interrupted or license verification failed.' 
+                      : (state.progress == 99 
+                          ? 'Loading Gemma 4 weights into secure memory. This may take 30-60 seconds...'
+                          : 'Downloading Gemma 4 E2B weights (2.6GB). This happens only once.'),
+                    textAlign: TextAlign.center,
+                    style: textTheme.bodySmall?.copyWith(color: colors.onSurface.withValues(alpha: 0.5)),
+                  ),
+                  const SizedBox(height: 32),
+                  if (!state.isError) ...[
+                    if (state.progress == 99)
+                      const BaryonLoader(size: 40)
+                    else
+                      Stack(
+                        children: [
+                          Container(
+                            height: 6,
+                            width: double.infinity,
+                            decoration: BoxDecoration(
+                              color: colors.onSurface.withValues(alpha: 0.05),
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          ),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 500),
+                            height: 6,
+                            width: MediaQuery.of(context).size.width * (state.progress / 100),
+                            decoration: BoxDecoration(
+                              color: colors.primary,
+                              borderRadius: BorderRadius.circular(3),
+                              boxShadow: [
+                                BoxShadow(color: colors.primary.withValues(alpha: 0.4), blurRadius: 8),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    const SizedBox(height: 12),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          state.progress == 99 ? 'BOOTING...' : '${state.progress}% COMPLETE',
+                          style: textTheme.labelSmall?.copyWith(
+                            fontFamily: 'monospace',
+                            fontWeight: FontWeight.bold,
+                            color: colors.primary,
+                          ),
+                        ),
+                        Text(
+                          'DO NOT CLOSE APP',
+                          style: textTheme.labelSmall?.copyWith(
+                            fontSize: 8,
+                            color: colors.onSurface.withValues(alpha: 0.3),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ] else ...[
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: () => context.read<AiCubit>().forceRedownload(),
+                        icon: const Icon(Icons.refresh, size: 18),
+                        label: const Text('RETRY PROVISIONING'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: colors.error,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 16),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
