@@ -29,6 +29,8 @@ class NearbyMeshServiceImpl implements MeshService {
   KeyPair? _myKeyPair;
   Timer? _heartbeatTimer;
   Timer? _pruningTimer;
+  Timer? _discoveryRestartTimer;
+  bool _isRunning = false;
   final Set<String> _connectingDeviceIds = {};
 
   NearbyMeshServiceImpl(this._gatewayMonitor, this._securityService, this._isar, {SatelliteGatewayService? satelliteService}) {
@@ -60,9 +62,12 @@ class NearbyMeshServiceImpl implements MeshService {
   Future<bool> _checkPermissions() async {
     developer.log('[NULLSIGNAL] MeshService: Requesting Mesh Permissions...', name: 'MeshService');
     
-    // 1. Basic permission checks
+    // 1. Basic permission checks. locationWhenInUse is what triggers the
+    // fine-location prompt on Android 12+ — without it, BLE scans silently
+    // return zero peers despite all Bluetooth permissions being granted.
     List<Permission> permissions = [
       Permission.location,
+      Permission.locationWhenInUse,
       Permission.nearbyWifiDevices,
       Permission.bluetoothScan,
       Permission.bluetoothAdvertise,
@@ -84,82 +89,126 @@ class NearbyMeshServiceImpl implements MeshService {
 
   @override
   Future<void> start() async {
+    if (_isRunning) {
+      developer.log('[NULLSIGNAL] MeshService: Already running, ignoring duplicate start().', name: 'MeshService');
+      return;
+    }
+    _isRunning = true;
     developer.log('[NULLSIGNAL] MeshService: STARTING with ID: $deviceId', name: 'MeshService');
-    
+
     if (!await _checkPermissions()) {
+      _isRunning = false;
       developer.log('[NULLSIGNAL] MeshService: CRITICAL - Permissions missing.', name: 'MeshService');
       return;
     }
 
     _myKeyPair = await _securityService.getOrCreateIdentity();
-    final advertisingName = _gatewayMonitor.isGateway ? "$deviceId|G" : deviceId;
-
-    // 1. Start Advertising
-    try {
-      developer.log('[NULLSIGNAL] MeshService: Activating Advertising as $advertisingName...', name: 'MeshService');
-      bool started = await Nearby().startAdvertising(
-        advertisingName,
-        _strategy,
-        onConnectionInitiated: _onConnectionInitiated,
-        onConnectionResult: (id, status) {
-          developer.log('[NULLSIGNAL] MeshService: Connection Result for $id: $status', name: 'MeshService');
-          _onConnectionResult(id, status);
-        },
-        onDisconnected: (id) {
-          developer.log('[NULLSIGNAL] MeshService: Device Disconnected: $id', name: 'MeshService');
-          _onDisconnected(id);
-        },
-        serviceId: _serviceId,
-      );
-      if (!started) {
-        developer.log('[NULLSIGNAL] MeshService: Advertising failed to start (returned false)', name: 'MeshService');
-      }
-    } catch (e) {
-      developer.log('[NULLSIGNAL] MeshService: Advertising ERROR: $e', name: 'MeshService');
-    }
-
-    // 2. Start Discovery
-    try {
-      developer.log('[NULLSIGNAL] MeshService: Activating Discovery...', name: 'MeshService');
-      bool started = await Nearby().startDiscovery(
-        deviceId, // Discovery name
-        _strategy,
-        onEndpointFound: (id, name, serviceId) {
-          developer.log('[NULLSIGNAL] MeshService: NODE FOUND: $id ($name)', name: 'MeshService');
-          final isGateway = name.endsWith('|G');
-          final cleanName = isGateway ? name.substring(0, name.length - 2) : name;
-          final device = MeshDevice(
-            deviceId: id,
-            deviceName: cleanName,
-            status: MeshDeviceStatus.discovered,
-            isGateway: isGateway,
-          );
-          _discoveredDevices[id] = device;
-          _updateDevices();
-          
-          // Use device ID comparison for deterministic connection initiator
-          if (deviceId.compareTo(id) < 0) {
-            developer.log('[NULLSIGNAL] MeshService: Primary. Initiating to $id...', name: 'MeshService');
-            connect(device);
-          }
-        },
-        onEndpointLost: (id) {
-          developer.log('[NULLSIGNAL] MeshService: NODE LOST: $id', name: 'MeshService');
-          _discoveredDevices.remove(id);
-          _endpointToDeviceId.remove(id);
-          _updateDevices();
-        },
-        serviceId: _serviceId,
-      );
-      if (!started) {
-        developer.log('[NULLSIGNAL] MeshService: Discovery failed to start (returned false)', name: 'MeshService');
-      }
-    } catch (e) {
-      developer.log('[NULLSIGNAL] MeshService: Discovery ERROR: $e', name: 'MeshService');
-    }
-
+    await _startAdvertising();
+    await _startDiscovery();
     _startHeartbeat();
     _startPruning();
+    _startDiscoveryRestarter();
+  }
+
+  Future<void> _startAdvertising() async {
+    final advertisingName = _gatewayMonitor.isGateway ? "$deviceId|G" : deviceId;
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        developer.log('[NULLSIGNAL] MeshService: Advertising attempt $attempt as $advertisingName...', name: 'MeshService');
+        final started = await Nearby().startAdvertising(
+          advertisingName,
+          _strategy,
+          onConnectionInitiated: _onConnectionInitiated,
+          onConnectionResult: (id, status) {
+            developer.log('[NULLSIGNAL] MeshService: Connection Result $id: $status', name: 'MeshService');
+            _onConnectionResult(id, status);
+          },
+          onDisconnected: (id) {
+            developer.log('[NULLSIGNAL] MeshService: Disconnected: $id', name: 'MeshService');
+            _onDisconnected(id);
+          },
+          serviceId: _serviceId,
+        );
+        if (started) {
+          developer.log('[NULLSIGNAL] MeshService: Advertising OK.', name: 'MeshService');
+          return;
+        }
+        developer.log('[NULLSIGNAL] MeshService: Advertising returned false (attempt $attempt)', name: 'MeshService');
+      } catch (e) {
+        developer.log('[NULLSIGNAL] MeshService: Advertising ERROR attempt $attempt: $e', name: 'MeshService');
+      }
+      if (attempt < 3) await Future.delayed(Duration(seconds: attempt * 3));
+    }
+  }
+
+  Future<void> _startDiscovery() async {
+    for (int attempt = 1; attempt <= 3; attempt++) {
+      try {
+        developer.log('[NULLSIGNAL] MeshService: Discovery attempt $attempt...', name: 'MeshService');
+        final started = await Nearby().startDiscovery(
+          deviceId,
+          _strategy,
+          onEndpointFound: _onEndpointFound,
+          onEndpointLost: _onEndpointLost,
+          serviceId: _serviceId,
+        );
+        if (started) {
+          developer.log('[NULLSIGNAL] MeshService: Discovery OK.', name: 'MeshService');
+          return;
+        }
+        developer.log('[NULLSIGNAL] MeshService: Discovery returned false (attempt $attempt)', name: 'MeshService');
+      } catch (e) {
+        developer.log('[NULLSIGNAL] MeshService: Discovery ERROR attempt $attempt: $e', name: 'MeshService');
+      }
+      if (attempt < 3) await Future.delayed(Duration(seconds: attempt * 3));
+    }
+  }
+
+  void _onEndpointFound(String id, String name, String serviceId) {
+    developer.log('[NULLSIGNAL] MeshService: NODE FOUND: $id ($name)', name: 'MeshService');
+    final isGateway = name.endsWith('|G');
+    final cleanName = isGateway ? name.substring(0, name.length - 2) : name;
+    final device = MeshDevice(
+      deviceId: id,
+      deviceName: cleanName,
+      status: MeshDeviceStatus.discovered,
+      isGateway: isGateway,
+    );
+    _discoveredDevices[id] = device;
+    _updateDevices();
+
+    // Compare logical device IDs (both "Node_xxx" format) for deterministic
+    // one-side-only connection initiation. Using `id` (Nearby endpoint ID)
+    // was wrong — it's a different namespace and broke the < ordering.
+    if (deviceId.compareTo(cleanName) < 0) {
+      developer.log('[NULLSIGNAL] MeshService: Primary. Initiating to $id...', name: 'MeshService');
+      connect(device);
+    }
+  }
+
+  void _onEndpointLost(String? id) {
+    if (id == null) return;
+    developer.log('[NULLSIGNAL] MeshService: NODE LOST: $id', name: 'MeshService');
+    _discoveredDevices.remove(id);
+    _endpointToDeviceId.remove(id);
+    _updateDevices();
+  }
+
+  void _startDiscoveryRestarter() {
+    _discoveryRestartTimer?.cancel();
+    // 45s interval — if NO device even discovered, restart both advertising and
+    // discovery. Don't restart when devices ARE discovered but not yet connected
+    // (connection handshake may be in progress).
+    _discoveryRestartTimer = Timer.periodic(const Duration(seconds: 45), (_) async {
+      if (!_isRunning) return;
+      if (_discoveredDevices.isEmpty) {
+        developer.log('[NULLSIGNAL] MeshService: No peers visible, cycling advertising+discovery...', name: 'MeshService');
+        try { await Nearby().stopAdvertising(); } catch (_) {}
+        try { await Nearby().stopDiscovery(); } catch (_) {}
+        await _startAdvertising();
+        await _startDiscovery();
+      }
+    });
   }
 
   void _startPruning() {
@@ -171,7 +220,7 @@ class NearbyMeshServiceImpl implements MeshService {
 
   void _startHeartbeat() {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 60), (timer) {
       _sendHeartbeat();
     });
   }
@@ -235,14 +284,9 @@ class NearbyMeshServiceImpl implements MeshService {
               _updateDevices();
             }
 
-            // 1. Check if we've already seen this packet to prevent loops/duplicates
-            if (!await _routingEngine.shouldForward(packet, deviceId)) {
-              // Note: shouldForward returns false if it's already seen OR if it's for us.
-            }
-            
-            // Re-evaluating routing check:
+            // Deduplicate: skip if we've already seen this packet
             final isNew = (await _isar.seenPackets.filter().packetIdEqualTo(packet.packetId).findFirst()) == null;
-            if (!isNew) return; // Skip duplicate processing
+            if (!isNew) return;
 
             // 2. Mark as seen
             await _isar.writeTxn(() async {
@@ -355,7 +399,10 @@ class NearbyMeshServiceImpl implements MeshService {
 
   @override
   Future<void> stop() async {
+    _isRunning = false;
     _heartbeatTimer?.cancel();
+    _pruningTimer?.cancel();
+    _discoveryRestartTimer?.cancel();
     await Nearby().stopAdvertising();
     await Nearby().stopDiscovery();
     await Nearby().stopAllEndpoints();
@@ -455,5 +502,6 @@ class NearbyMeshServiceImpl implements MeshService {
     stop();
     _devicesSubject.close();
     _incomingPacketsSubject.close();
+    _discoveryRestartTimer?.cancel();
   }
 }

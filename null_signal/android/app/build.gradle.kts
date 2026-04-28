@@ -6,6 +6,7 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -45,11 +46,30 @@ android {
         buildConfig = true
     }
 
+    // Keep the bundled Gemma .task model uncompressed inside the APK so the OS
+    // can mmap it directly. Compressed assets must be fully extracted at runtime
+    // and would double both install time and disk usage for a 2 GB model.
+    androidResources {
+        noCompress += listOf("task", "litertlm", "tflite", "bin")
+    }
+
+    // The packaged model is large (~2 GB). The default 2 GB APK upper limit on
+    // Android may be hit; allow bundle splits per ABI in release if you need to.
+    packaging {
+        resources {
+            excludes += listOf("META-INF/DEPENDENCIES", "META-INF/LICENSE")
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
         }
     }
 }

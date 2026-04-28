@@ -13,7 +13,8 @@ import 'package:cryptography/cryptography.dart';
 class ResourceBrokerService {
   final MeshService _meshService;
   final SecurityService _securityService;
-  
+  static const int _maxMatches = 50;
+
   final _matchesSubject = BehaviorSubject<List<ResourceMatch>>.seeded([]);
   StreamSubscription? _meshSubscription;
 
@@ -97,7 +98,8 @@ class ResourceBrokerService {
          swapPoint: 'Sector A Safe Zone',
        );
        final current = _matchesSubject.value;
-       _matchesSubject.add([...current, match]);
+       final updated = [...current, match];
+       _matchesSubject.add(updated.length > _maxMatches ? updated.sublist(updated.length - _maxMatches) : updated);
     }
   }
 

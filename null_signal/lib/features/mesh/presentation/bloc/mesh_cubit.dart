@@ -28,6 +28,7 @@ class MeshCubit extends Cubit<MeshState> {
   final SecurityService _securityService;
   final String _deviceId;
   StreamSubscription? _deviceSubscription;
+  StreamSubscription? _packetSubscription;
 
   MeshCubit(this._meshService, this._securityService, this._deviceId) : super(MeshState(
     connectedDevices: [],
@@ -42,11 +43,16 @@ class MeshCubit extends Cubit<MeshState> {
       isScanning: true,
     ));
     await _meshService.start();
-    
+
+    // Cancel any existing subscriptions before re-listening — refresh button calls
+    // this repeatedly, leaking listeners that fire duplicate emit() per device update.
+    await _deviceSubscription?.cancel();
+    await _packetSubscription?.cancel();
+
     _deviceSubscription = _meshService.devicesStream.listen((devices) {
       final connected = devices.where((d) => d.isConnected).toList();
       final scanned = devices.where((d) => !d.isConnected).toList();
-      
+
       emit(MeshState(
         connectedDevices: connected,
         scannedDevices: scanned,
@@ -54,12 +60,9 @@ class MeshCubit extends Cubit<MeshState> {
       ));
     });
 
-    // Handle incoming direct messages
-    _meshService.incomingPackets.listen((packet) async {
+    _packetSubscription = _meshService.incomingPackets.listen((packet) async {
       if (packet.receiverId == _deviceId) {
         developer.log('MeshCubit: New direct message received from ${packet.senderId}');
-        // In a real app, we would decrypt and show a notification or update a chat UI
-        // For now, we'll log it and assume the receiver logic is working.
       }
     });
   }
@@ -119,6 +122,7 @@ class MeshCubit extends Cubit<MeshState> {
 
   void stopScanning() async {
     await _deviceSubscription?.cancel();
+    await _packetSubscription?.cancel();
     await _meshService.stop();
     emit(MeshState(
       connectedDevices: [],
@@ -130,6 +134,7 @@ class MeshCubit extends Cubit<MeshState> {
   @override
   Future<void> close() {
     _deviceSubscription?.cancel();
+    _packetSubscription?.cancel();
     return super.close();
   }
 }

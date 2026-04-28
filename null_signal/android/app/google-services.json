@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1002747541278",
+    "project_id": "nullsignal-18520",
+    "storage_bucket": "nullsignal-18520.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1002747541278:android:a313adb2a2e4899a78bb0f",
+        "android_client_info": {
+          "package_name": "com.nullsignal.null_signal"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAB23uOBvxMqLhMi4mpETmxKGKbCJ7R4Hk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

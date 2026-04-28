@@ -8,13 +8,17 @@
     <uses-permission android:name="android.permission.BLUETOOTH" />
     <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
     
-    <!-- Android 12+ Bluetooth permissions -->
-    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" android:usesPermissionFlags="neverForLocation" />
+    <!-- Android 12+ Bluetooth permissions.
+         IMPORTANT: do NOT add usesPermissionFlags="neverForLocation" here.
+         Nearby Connections requires location-derivation from BLE scans for peer
+         discovery; the flag silently breaks discovery on Android 12+. -->
+    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
-    
-    <!-- Android 13+ Nearby WIFI permissions -->
-    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />
+    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
+
+    <!-- Android 13+ Nearby WIFI permissions. Same caveat — Nearby Connections
+         uses Wi-Fi scans for proximity, so neverForLocation breaks discovery. -->
+    <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
     <uses-feature

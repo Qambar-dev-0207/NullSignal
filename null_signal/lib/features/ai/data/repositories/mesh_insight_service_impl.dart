@@ -16,8 +16,9 @@ class MeshInsightServiceImpl implements MeshInsightService {
   StreamSubscription? _meshSubscription;
   Timer? _synthesisTimer;
   
-  // Buffering packets for synthesis
+  // Buffering packets for synthesis — capped per sector to prevent OOM
   final Map<String, List<MeshPacket>> _sectorBuffer = {};
+  static const int _maxPacketsPerSector = 100;
 
   MeshInsightServiceImpl(this._meshService, this._aiService, this._isar);
 
@@ -26,13 +27,11 @@ class MeshInsightServiceImpl implements MeshInsightService {
 
   @override
   void start() {
+    if (_meshSubscription != null) return; // idempotent
     _meshSubscription = _meshService.incomingPackets.listen(_onPacketReceived);
-    
-    // Periodically synthesize (every 5 minutes)
     _synthesisTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       _runAutoSynthesis();
     });
-    
     _loadStoredSummaries();
   }
 
@@ -46,7 +45,9 @@ class MeshInsightServiceImpl implements MeshInsightService {
     // For now, we buffer everything with priority > medium
     if (packet.priority.index >= PacketPriority.medium.index) {
       final sectorId = _getSectorId(packet.latitude, packet.longitude);
-      _sectorBuffer.putIfAbsent(sectorId, () => []).add(packet);
+      final bucket = _sectorBuffer.putIfAbsent(sectorId, () => []);
+      bucket.add(packet);
+      if (bucket.length > _maxPacketsPerSector) bucket.removeAt(0);
     }
   }
 

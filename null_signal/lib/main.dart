@@ -69,18 +69,16 @@ void main() async {
         ? NearbyMeshServiceImpl(gatewayMonitor, securityService, isar, satelliteService: satelliteService) 
         : SimulatedMeshService(gatewayMonitor, securityService, isar);
     
-    meshService.start();
-
     AIService? nativeService;
     if (isPhysicalDevice) {
       nativeService = Platform.isAndroid ? AndroidAIService(useGPU: true) : IosAIService();
     }
     
     const String geminiApiKey = String.fromEnvironment('GEMINI_API_KEY', defaultValue: '');
-    final aiService = GeminiAIService(apiKey: geminiApiKey, nativeService: nativeService);
-    
-    // Non-blocking initialization
-    aiService.initialize().catchError((e) => developer.log('[AI] Init Error: $e', name: 'System'));
+    final aiService = GeminiAIService(apiKey: geminiApiKey, nativeService: nativeService, gatewayMonitor: gatewayMonitor);
+    // NOTE: Do NOT call aiService.initialize() here. AiCubit handles initialization
+    // and emits progress to the UI. A duplicate call here causes concurrent writes
+    // to the model file, corrupting it.
 
     final meshInsightService = MeshInsightServiceImpl(meshService, aiService, isar);
     final resourceBroker = ResourceBrokerService(meshService, aiService, isar, securityService);

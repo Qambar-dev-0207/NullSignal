@@ -29,12 +29,15 @@ class _PanicNavigationWrapperState extends State<PanicNavigationWrapper> {
   StreamSubscription<bool>? _checkInSubscription;
   StreamSubscription<void>? _autoSosSubscription;
 
-  final List<Widget> _screens = [
-    const NormalDashboardScreen(),
-    const SOSBroadcastScreen(),
-    const PanicNearbyScreen(),
-    const PanicAIHelpScreen(),
-  ];
+  // Screens built on demand — only one in the widget tree at a time.
+  Widget _buildScreen(int index) {
+    switch (index) {
+      case 0: return const NormalDashboardScreen();
+      case 2: return const PanicNearbyScreen();
+      case 3: return const PanicAIHelpScreen();
+      default: return const SOSBroadcastScreen();
+    }
+  }
 
   @override
   void initState() {
@@ -214,7 +217,7 @@ class _PanicNavigationWrapperState extends State<PanicNavigationWrapper> {
         },
         child: Container(
           key: ValueKey<int>(_currentIndex),
-          child: _screens[_currentIndex],
+          child: _buildScreen(_currentIndex),
         ),
       ),
       bottomNavigationBar: Container(

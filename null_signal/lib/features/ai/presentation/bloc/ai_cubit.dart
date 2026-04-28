@@ -38,6 +38,7 @@ class AiCubit extends Cubit<AiState> {
   final MeshInsightService _meshInsightService;
   final Isar _isar;
   StreamSubscription? _downloadSub;
+  StreamSubscription? _summariesSub;
 
   AiCubit(this._aiService, this._meshInsightService, this._isar) : super(AiInitial());
 
@@ -52,8 +53,9 @@ class AiCubit extends Cubit<AiState> {
     try {
       await _aiService.initialize();
       _meshInsightService.start();
-      
-      _meshInsightService.sectorSummariesStream.listen((summaries) {
+
+      _summariesSub?.cancel();
+      _summariesSub = _meshInsightService.sectorSummariesStream.listen((summaries) {
         if (state is AiResponse) {
           final s = state as AiResponse;
           emit(AiResponse(s.title, s.content, history: s.history, sectorSummaries: summaries));
@@ -64,6 +66,12 @@ class AiCubit extends Cubit<AiState> {
       final summaries = await _meshInsightService.getStoredSummaries();
       emit(AiResponse('SYSTEM READY', 'Nano AI online.', history: history, sectorSummaries: summaries));
     } catch (e) {
+      // ALREADY_INITIALIZING means a previous call is still running (e.g. a retry was
+      // tapped while the original download was still in progress). In that case the
+      // existing download is fine — just let it finish and the progress stream will
+      // keep the UI updated.
+      final message = e.toString();
+      if (message.contains('ALREADY_INITIALIZING')) return;
       if (state is! AiProvisioning) {
         emit(AiError('AI Initialization Failed: $e'));
       }
@@ -83,6 +91,7 @@ class AiCubit extends Cubit<AiState> {
   @override
   Future<void> close() {
     _downloadSub?.cancel();
+    _summariesSub?.cancel();
     return super.close();
   }
 

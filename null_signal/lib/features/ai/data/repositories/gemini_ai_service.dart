@@ -1,5 +1,6 @@
 import 'dart:developer' as developer;
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:null_signal/core/services/gateway_monitor.dart';
 import 'package:null_signal/features/ai/domain/repositories/ai_service.dart';
 import 'package:null_signal/features/ai/data/models/chat_message.dart';
 import 'package:null_signal/features/ai/data/repositories/android_ai_service.dart';
@@ -7,14 +8,22 @@ import 'package:null_signal/features/ai/data/repositories/android_ai_service.dar
 class GeminiAIService implements AIService {
   final String apiKey;
   final AIService? nativeService;
+  final GatewayMonitor? gatewayMonitor;
   late final GenerativeModel _model;
   ChatSession? _chat;
+  bool _initialized = false;
+
+  bool get _hasInternet => gatewayMonitor?.isGateway ?? false;
+  bool get _canUseCloud => apiKey.isNotEmpty && apiKey != 'YOUR_GEMINI_API_KEY' && _hasInternet;
 
   bool get isProvisioned {
     if (nativeService is AndroidAIService) {
       return (nativeService as AndroidAIService).currentProgress == 100;
     }
-    // For iOS, assume provisioned once initialized (AppDelegate handles download internally)
+    // iOS: only ready once initialize() has actually completed. Returning true
+    // unconditionally caused chat() to dispatch to a not-yet-loaded native
+    // service on first launch.
+    if (nativeService != null) return _initialized;
     return true;
   }
 
@@ -27,9 +36,9 @@ class GeminiAIService implements AIService {
     return Stream.value(100);
   }
 
-  GeminiAIService({required this.apiKey, this.nativeService}) {
+  GeminiAIService({required this.apiKey, this.nativeService, this.gatewayMonitor}) {
     _model = GenerativeModel(
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash-lite',
       apiKey: apiKey,
       generationConfig: GenerationConfig(
         temperature: 0.4,
@@ -48,13 +57,14 @@ class GeminiAIService implements AIService {
     if (nativeService != null) {
       try {
         await nativeService!.initialize();
+        _initialized = true;
       } catch (e) {
         developer.log('Native AI init failed: $e');
         rethrow; // Rethrow to let the UI/Orchestrator handle the failure
       }
     }
-    
-    if (apiKey.isNotEmpty && apiKey != 'YOUR_GEMINI_API_KEY') {
+
+    if (_canUseCloud) {
       try {
         _chat = _model.startChat();
       } catch (e) {
@@ -65,16 +75,15 @@ class GeminiAIService implements AIService {
 
   @override
   Future<String> getTriageResponse(String symptoms) async {
-    // 1. Try Native AI first
-    if (nativeService != null) {
+    // 1. Try Native AI first (only when model is fully loaded)
+    if (nativeService != null && isProvisioned) {
       try {
-        final response = await nativeService!.getTriageResponse(symptoms);
-        if (!response.contains('Error')) return response;
+        return await nativeService!.getTriageResponse(symptoms);
       } catch (_) {}
     }
 
     // 2. Try Cloud AI if apiKey exists
-    if (apiKey.isNotEmpty && apiKey != 'YOUR_GEMINI_API_KEY') {
+    if (_canUseCloud) {
       try {
         final content = [Content.text('Triage this survivor: $symptoms. Assign a START triage color (Green/Yellow/Red) and explain why.')];
         final response = await _model.generateContent(content);
@@ -100,16 +109,15 @@ class GeminiAIService implements AIService {
       return _burnMgmtGuidance;
     }
 
-    // Try Native
-    if (nativeService != null) {
+    // Try Native (only when model is fully loaded)
+    if (nativeService != null && isProvisioned) {
       try {
-        final response = await nativeService!.getFirstAidGuidance(condition);
-        if (!response.contains('Error')) return response;
+        return await nativeService!.getFirstAidGuidance(condition);
       } catch (_) {}
     }
 
     // Try Cloud
-    if (apiKey.isNotEmpty && apiKey != 'YOUR_GEMINI_API_KEY') {
+    if (_canUseCloud) {
       try {
         final content = [Content.text('Provide immediate, step-by-step offline first-aid guidance for: $condition. Use clear, numbered steps.')];
         final response = await _model.generateContent(content);
@@ -122,16 +130,15 @@ class GeminiAIService implements AIService {
 
   @override
   Future<String> chat(String message, {List<ChatMessage>? history}) async {
-    // Try Native
-    if (nativeService != null) {
+    // Try Native (only when model is fully loaded)
+    if (nativeService != null && isProvisioned) {
       try {
-        final response = await nativeService!.chat(message, history: history);
-        if (!response.contains('Error')) return response;
+        return await nativeService!.chat(message, history: history);
       } catch (_) {}
     }
 
     // Try Cloud
-    if (apiKey.isNotEmpty && apiKey != 'YOUR_GEMINI_API_KEY') {
+    if (_canUseCloud) {
       try {
         if (_chat == null) {
           final historyContent = history?.map((m) => Content(

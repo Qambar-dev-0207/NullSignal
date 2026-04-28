@@ -1,0 +1,21 @@
+Place the Gemma 4 model file here:
+
+  gemma-4-E2B-it-web.task   (~2.0 GB)
+
+Source:
+  https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/blob/main/gemma-4-E2B-it-web.task
+
+You must accept the Gemma license on HuggingFace before the file becomes
+downloadable. After downloading, drop it next to this file.
+
+When the file is present:
+  - The APK becomes ~2 GB but works fully offline on first launch.
+  - MainActivity copies it from APK assets to filesDir on first init,
+    skipping the network entirely.
+
+When the file is absent:
+  - The APK stays ~50 MB.
+  - MainActivity falls back to the runtime download path (requires network
+    plus a valid HF token + accepted Gemma license).
+
+The .gitignore in this folder excludes the binary so it never lands in git.

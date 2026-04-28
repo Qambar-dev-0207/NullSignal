@@ -36,6 +36,10 @@ class IntelligenceServiceImpl implements IntelligenceService {
   
   final List<int> _crowdHistory = [];
   static const double seismicSpikeThreshold = 15.0;
+  static const int _maxPolygons = 50;
+  static const int _maxHeatmapEntries = 100;
+  static const int _maxMatches = 50;
+  DateTime _lastSeismicBroadcast = DateTime.fromMillisecondsSinceEpoch(0);
 
   IntelligenceServiceImpl(this._meshService, this._gatewayMonitor, this._aiService, this._securityService);
 
@@ -54,17 +58,21 @@ class IntelligenceServiceImpl implements IntelligenceService {
   void start() {
     _meshSubscription = _meshService.incomingPackets.listen(_handleIncomingPacket);
     
-    // Seismic Monitoring
+    // Seismic Monitoring — debounce broadcasts to max 1 per 30s
     _accelerometerSubscription = accelerometerEventStream().listen((event) {
       final gForce = sqrt(event.x * event.x + event.y * event.y + event.z * event.z);
       _localGForceSubject.add(gForce);
       if (gForce > seismicSpikeThreshold) {
-        _broadcastSeismicEvent(gForce);
+        final now = DateTime.now();
+        if (now.difference(_lastSeismicBroadcast).inSeconds >= 30) {
+          _lastSeismicBroadcast = now;
+          _broadcastSeismicEvent(gForce);
+        }
       }
     });
 
-    // Crowd Monitoring
-    _crowdTimer = Timer.periodic(const Duration(seconds: 30), (_) => _checkCrowdDensity());
+    // Crowd Monitoring — 5 min interval; AI inference per call is expensive
+    _crowdTimer = Timer.periodic(const Duration(minutes: 5), (_) => _checkCrowdDensity());
 
     // Hazard Polling
     _pollingTimer = Timer.periodic(const Duration(minutes: 10), (_) {
@@ -88,13 +96,15 @@ class IntelligenceServiceImpl implements IntelligenceService {
           if (distance <= maxHazardRadiusKm) {
             final current = _polygonsSubject.value;
             if (!current.contains(packet.payload)) {
-              _polygonsSubject.add([...current, packet.payload]);
+              final updated = [...current, packet.payload];
+              _polygonsSubject.add(updated.length > _maxPolygons ? updated.sublist(updated.length - _maxPolygons) : updated);
             }
           }
         } catch (_) {
           final current = _polygonsSubject.value;
           if (!current.contains(packet.payload)) {
-            _polygonsSubject.add([...current, packet.payload]);
+            final updated = [...current, packet.payload];
+            _polygonsSubject.add(updated.length > _maxPolygons ? updated.sublist(updated.length - _maxPolygons) : updated);
           }
         }
         break;
@@ -105,9 +115,13 @@ class IntelligenceServiceImpl implements IntelligenceService {
         if (packet.payload.startsWith('SEISMIC_MAGNITUDE:')) {
           final magStr = packet.payload.substring('SEISMIC_MAGNITUDE:'.length);
           final magnitude = double.tryParse(magStr) ?? 0.0;
-          final current = _damageHeatmapSubject.value;
+          final current = Map<String, double>.from(_damageHeatmapSubject.value);
           current[packet.senderId] = magnitude;
-          _damageHeatmapSubject.add({...current});
+          if (current.length > _maxHeatmapEntries) {
+            final oldest = current.keys.first;
+            current.remove(oldest);
+          }
+          _damageHeatmapSubject.add(current);
         }
         break;
       default:
@@ -123,7 +137,8 @@ class IntelligenceServiceImpl implements IntelligenceService {
   Future<void> injectMockHazard() async {
     const mockGeoJson = '{"type":"Feature","properties":{"hazard":"FLOOD"},"geometry":{"type":"Polygon","coordinates":[[[-118.25,34.05],[-118.24,34.05],[-118.24,34.06],[-118.25,34.06],[-118.25,34.05]]]}}';
     await _broadcastPacket(PacketType.hazardMap, mockGeoJson, PacketPriority.high);
-    _polygonsSubject.add([..._polygonsSubject.value, mockGeoJson]);
+    final updated = [..._polygonsSubject.value, mockGeoJson];
+    _polygonsSubject.add(updated.length > _maxPolygons ? updated.sublist(updated.length - _maxPolygons) : updated);
   }
 
   // --- Crowd Methods ---

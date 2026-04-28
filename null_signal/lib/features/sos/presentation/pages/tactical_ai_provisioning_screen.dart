@@ -5,6 +5,7 @@ import 'package:null_signal/core/theme/app_theme.dart';
 import 'package:null_signal/core/utils/animations.dart';
 import 'package:null_signal/features/ai/domain/repositories/ai_service.dart';
 import 'package:null_signal/features/ai/data/repositories/gemini_ai_service.dart';
+import 'package:null_signal/features/ai/presentation/bloc/ai_cubit.dart';
 
 class TacticalAiProvisioningScreen extends StatefulWidget {
   final VoidCallback onComplete;
@@ -163,7 +164,16 @@ class _TacticalAiProvisioningScreenState extends State<TacticalAiProvisioningScr
                               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                               side: BorderSide(color: isError ? Colors.red : Colors.orange),
                             ),
-                            onPressed: () => context.read<AIService>().initialize(),
+                            // Use AiCubit.initialize() so the cubit resets its subscription
+                            // and properly transitions state when the retry succeeds.
+                            onPressed: () {
+                              setState(() => _isStuck = false);
+                              _stuckTimer?.cancel();
+                              _stuckTimer = Timer(const Duration(seconds: 30), () {
+                                if (mounted) setState(() => _isStuck = true);
+                              });
+                              context.read<AiCubit>().initialize();
+                            },
                             child: Text(isError ? 'RETRY' : 'RE-SYNC'),
                           ),
                           const SizedBox(width: 16),
